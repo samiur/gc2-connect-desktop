@@ -47,18 +47,37 @@ tools/
 ## Development Commands
 
 ```bash
-# Install dependencies
-pip install -e .
+# Install dependencies (using uv)
+uv sync
+
+# Add a new package
+uv add <package>
 
 # Run the app
-python -m gc2_connect.main
+uv run python -m gc2_connect.main
 
 # Run tests
-pytest
+uv run pytest
+
+# Run linting
+uv run ruff check .
 
 # Run mock GSPro server (for testing)
-python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
+uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
 ```
+
+## Package Management
+
+- We use **uv** for Python package management (not pip or poetry)
+- No requirements.txt needed - dependencies are in `pyproject.toml`
+- Run any script with `uv run <script.py>`
+- Add packages with `uv add <package>`
+
+## Workflow
+
+- If a `todo.md` exists, check off completed work
+- **Tests must pass** before any task is considered done
+- **Linting must pass** before any task is considered done
 
 ## Important Considerations
 

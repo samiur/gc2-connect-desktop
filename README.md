@@ -34,15 +34,11 @@ sudo apt install libusb-1.0-0-dev
 # Clone or download the project
 cd gc2-connect-desktop
 
-# Create virtual environment (recommended)
-python3 -m venv venv
-source venv/bin/activate
+# Install dependencies using uv
+uv sync
 
-# Install the package
-pip install -e .
-
-# Or install dependencies directly
-pip install nicegui pyusb pydantic pydantic-settings
+# Or if you don't have uv, install it first:
+# curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ## Usage
@@ -50,14 +46,11 @@ pip install nicegui pyusb pydantic pydantic-settings
 ### Running the App
 
 ```bash
-# Using the entry point
-gc2-connect
+# Run the app
+uv run python -m gc2_connect.main
 
-# Or run directly
-python -m gc2_connect.main
-
-# Or
-python src/gc2_connect/main.py
+# Or using the entry point (after install)
+uv run gc2-connect
 ```
 
 The app will start a web server at `http://localhost:8080` and open in your browser.
@@ -98,15 +91,28 @@ sudo udevadm trigger
 
 ## Configuration
 
-Settings are stored in `~/.gc2-connect/config.json`:
+Settings are stored in platform-specific locations:
+- **macOS**: `~/Library/Application Support/GC2 Connect/settings.json`
+- **Linux**: `~/.config/gc2-connect/settings.json`
 
 ```json
 {
+  "version": 1,
   "gspro": {
     "host": "192.168.1.100",
-    "port": 921
+    "port": 921,
+    "auto_connect": false
   },
-  "auto_send": true
+  "gc2": {
+    "auto_connect": true,
+    "reject_zero_spin": true,
+    "use_mock": false
+  },
+  "ui": {
+    "theme": "dark",
+    "show_history": true,
+    "history_limit": 50
+  }
 }
 ```
 
@@ -153,15 +159,23 @@ gc2-connect-desktop/
 ## Development
 
 ```bash
-# Install dev dependencies
-pip install -e ".[dev]"
+# Install dependencies (includes dev deps)
+uv sync
 
 # Run tests
-pytest
+uv run pytest
 
-# Format code
-ruff format .
+# Run linting
+uv run ruff check .
+
+# Run type checking
+uv run mypy src/
+
+# Run mock GSPro server for testing
+uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
 ```
+
+See `plan.md` for the implementation roadmap and `todo.md` for current progress.
 
 ## License
 
