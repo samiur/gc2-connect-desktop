@@ -1,3 +1,5 @@
+# ABOUTME: Pydantic/dataclass models for GC2 shot data and GSPro API messages.
+# ABOUTME: Handles data parsing, validation, and conversion between GC2 and GSPro formats.
 """Data models for GC2 shot data and GSPro messages."""
 
 from __future__ import annotations

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ABOUTME: Mock GSPro server for testing GC2 Connect without actual GSPro software.
+# ABOUTME: Accepts shot data, logs it, and returns success responses.
 """Mock GSPro server for testing without GSPro."""
 
 import argparse
