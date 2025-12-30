@@ -21,10 +21,10 @@ Started: 2025-12-30
   - [x] Add comments to all Python files
   - [x] Verify linting passes
 
-- [ ] **Prompt 3**: Unit Tests for Data Models
-  - [ ] Test GC2ShotData
-  - [ ] Test GSProShotMessage
-  - [ ] Test GSProResponse
+- [x] **Prompt 3**: Unit Tests for Data Models
+  - [x] Test GC2ShotData
+  - [x] Test GSProShotMessage
+  - [x] Test GSProResponse
 
 - [ ] **Prompt 4**: Unit Tests for GC2 Protocol
   - [ ] Test basic parsing
