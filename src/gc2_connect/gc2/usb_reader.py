@@ -1,3 +1,5 @@
+# ABOUTME: USB communication handler for the Foresight GC2 launch monitor.
+# ABOUTME: Reads shot data via USB bulk transfer and provides mock reader for testing.
 """GC2 USB communication handler."""
 
 from __future__ import annotations

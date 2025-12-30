@@ -1,3 +1,5 @@
+# ABOUTME: NiceGUI web-based user interface for GC2 Connect.
+# ABOUTME: Displays connection status, shot data, history, and provides manual controls.
 """GC2 Connect - NiceGUI Application."""
 
 from __future__ import annotations

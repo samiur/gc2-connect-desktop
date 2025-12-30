@@ -1,3 +1,5 @@
+# ABOUTME: TCP client for GSPro Open Connect API v1.
+# ABOUTME: Sends shot data to GSPro golf simulator and handles responses.
 """GSPro Open Connect API v1 client."""
 
 from __future__ import annotations
