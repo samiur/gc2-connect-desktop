@@ -26,10 +26,10 @@ Started: 2025-12-30
   - [x] Test GSProShotMessage
   - [x] Test GSProResponse
 
-- [ ] **Prompt 4**: Unit Tests for GC2 Protocol
-  - [ ] Test basic parsing
-  - [ ] Test validation
-  - [ ] Test edge cases
+- [x] **Prompt 4**: Unit Tests for GC2 Protocol
+  - [x] Test basic parsing
+  - [x] Test validation
+  - [x] Test edge cases
 
 - [ ] **Prompt 5**: Unit Tests for GSPro Client
   - [ ] Test initialization
