@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 from nicegui import ui
 
+from gc2_connect.config.settings import Settings, get_settings_path
 from gc2_connect.gc2.usb_reader import GC2USBReader, MockGC2Reader
 from gc2_connect.gspro.client import GSProClient
 from gc2_connect.models import GC2ShotData
@@ -24,13 +26,18 @@ logger = logging.getLogger(__name__)
 class GC2ConnectApp:
     """Main application class."""
 
-    def __init__(self):
-        # State
+    def __init__(self) -> None:
+        # Load settings
+        self.settings = Settings.load()
+        logger.info(f"Settings loaded from {get_settings_path()}")
+
+        # State (initialized from settings)
         self.gc2_reader: GC2USBReader | MockGC2Reader | None = None
         self.gspro_client: GSProClient | None = None
         self.shot_history: list[GC2ShotData] = []
         self.auto_send = True
-        self.use_mock_gc2 = False
+        self.use_mock_gc2 = self.settings.gc2.use_mock
+        self.history_limit = self.settings.ui.history_limit
 
         # UI references
         self.gc2_status_label = None
@@ -39,13 +46,54 @@ class GC2ConnectApp:
         self.history_list = None
         self.gspro_host_input = None
         self.gspro_port_input = None
+        self.history_limit_input = None
+        self.settings_path_label = None
 
         # Tasks
         self._gc2_task: asyncio.Task | None = None
 
-    def build_ui(self):
+    def save_settings(self) -> None:
+        """Save current settings to file."""
+        try:
+            self.settings.save()
+            logger.info("Settings saved")
+        except Exception as e:
+            logger.error(f"Failed to save settings: {e}")
+            ui.notify(f"Failed to save settings: {e}", type="negative")
+
+    def get_settings_path(self) -> Path:
+        """Get the path to the settings file."""
+        return get_settings_path()
+
+    def update_gspro_host(self, host: str) -> None:
+        """Update GSPro host and save settings."""
+        self.settings.gspro.host = host
+        self.save_settings()
+
+    def update_gspro_port(self, port: int) -> None:
+        """Update GSPro port and save settings."""
+        self.settings.gspro.port = port
+        self.save_settings()
+
+    def update_use_mock(self, use_mock: bool) -> None:
+        """Update use_mock setting and save."""
+        self.use_mock_gc2 = use_mock
+        self.settings.gc2.use_mock = use_mock
+        self.save_settings()
+
+    def update_history_limit(self, limit: int) -> None:
+        """Update history limit and save settings."""
+        self.history_limit = limit
+        self.settings.ui.history_limit = limit
+        self.save_settings()
+
+    def build_ui(self) -> None:
         """Build the NiceGUI interface."""
-        ui.dark_mode().enable()
+        # Apply theme from settings
+        if self.settings.ui.theme == "dark":
+            ui.dark_mode().enable()
+        else:
+            ui.dark_mode().disable()
 
         with ui.header().classes('bg-blue-900'):
             ui.label('GC2 Connect').classes('text-2xl font-bold')
@@ -59,6 +107,7 @@ class GC2ConnectApp:
             with ui.column().classes('w-1/3'):
                 self._build_gc2_panel()
                 self._build_gspro_panel()
+                self._build_settings_panel()
 
             # Center column - Current Shot
             with ui.column().classes('w-1/3'):
@@ -68,7 +117,7 @@ class GC2ConnectApp:
             with ui.column().classes('w-1/3'):
                 self._build_history_panel()
 
-    def _build_gc2_panel(self):
+    def _build_gc2_panel(self) -> None:
         """Build the GC2 connection panel."""
         with ui.card().classes('w-full'):
             ui.label('GC2 Launch Monitor').classes('text-lg font-bold')
@@ -83,11 +132,14 @@ class GC2ConnectApp:
                 ui.button('Disconnect', on_click=self._disconnect_gc2).classes('bg-red-600')
 
             with ui.row().classes('items-center gap-2 mt-2'):
-                ui.checkbox('Use Mock GC2', value=False,
-                           on_change=lambda e: setattr(self, 'use_mock_gc2', e.value))
+                ui.checkbox(
+                    'Use Mock GC2',
+                    value=self.use_mock_gc2,
+                    on_change=lambda e: self.update_use_mock(e.value)
+                )
                 ui.button('Send Test Shot', on_click=self._send_test_shot).props('flat')
 
-    def _build_gspro_panel(self):
+    def _build_gspro_panel(self) -> None:
         """Build the GSPro connection panel."""
         with ui.card().classes('w-full mt-4'):
             ui.label('GSPro Connection').classes('text-lg font-bold')
@@ -99,21 +151,100 @@ class GC2ConnectApp:
             with ui.column().classes('gap-2 mt-2'):
                 self.gspro_host_input = ui.input(
                     label='GSPro IP Address',
-                    value='192.168.1.100',
-                    placeholder='e.g., 192.168.1.100'
+                    value=self.settings.gspro.host,
+                    placeholder='e.g., 192.168.1.100',
+                    on_change=lambda e: self.update_gspro_host(e.value)
                 ).classes('w-full')
 
                 self.gspro_port_input = ui.input(
                     label='Port',
-                    value='921',
-                    placeholder='921'
+                    value=str(self.settings.gspro.port),
+                    placeholder='921',
+                    on_change=lambda e: self._on_port_change(e.value)
                 ).classes('w-32')
 
             with ui.row().classes('gap-2 mt-4'):
                 ui.button('Connect', on_click=self._connect_gspro).classes('bg-green-600')
                 ui.button('Disconnect', on_click=self._disconnect_gspro).classes('bg-red-600')
 
-    def _build_shot_display(self):
+    def _on_port_change(self, value: str) -> None:
+        """Handle port input change with validation."""
+        try:
+            port = int(value)
+            if port > 0:
+                self.update_gspro_port(port)
+        except ValueError:
+            pass  # Ignore invalid port values
+
+    def _build_settings_panel(self) -> None:
+        """Build the settings panel with collapsible section."""
+        with ui.expansion('Settings', icon='settings').classes('w-full mt-4'):  # noqa: SIM117
+            with ui.card().classes('w-full'):  # Card must be inside expansion for NiceGUI
+                # History settings
+                ui.label('History Settings').classes('text-md font-semibold')
+                with ui.row().classes('items-center gap-2 mt-2'):
+                    ui.label('History Limit:')
+                    self.history_limit_input = ui.number(
+                        value=self.history_limit,
+                        min=10,
+                        max=500,
+                        step=10,
+                        on_change=lambda e: self._on_history_limit_change(e.value)
+                    ).classes('w-24')
+
+                ui.separator().classes('my-4')
+
+                # Auto-connect settings
+                ui.label('Auto-Connect').classes('text-md font-semibold')
+                with ui.column().classes('gap-2 mt-2'):
+                    ui.checkbox(
+                        'Auto-connect GC2 on startup',
+                        value=self.settings.gc2.auto_connect,
+                        on_change=lambda e: self._on_gc2_auto_connect_change(e.value)
+                    )
+                    ui.checkbox(
+                        'Auto-connect GSPro on startup',
+                        value=self.settings.gspro.auto_connect,
+                        on_change=lambda e: self._on_gspro_auto_connect_change(e.value)
+                    )
+
+                ui.separator().classes('my-4')
+
+                # Settings file location
+                ui.label('Settings File').classes('text-md font-semibold')
+                self.settings_path_label = ui.label(
+                    str(get_settings_path())
+                ).classes('text-xs text-gray-400 break-all mt-1')
+
+                # Save button
+                with ui.row().classes('mt-4'):
+                    ui.button(
+                        'Save Settings',
+                        on_click=self._on_save_settings_click,
+                        icon='save'
+                    ).props('flat')
+
+    def _on_history_limit_change(self, value: float | None) -> None:
+        """Handle history limit change."""
+        if value is not None and value > 0:
+            self.update_history_limit(int(value))
+
+    def _on_gc2_auto_connect_change(self, value: bool) -> None:
+        """Handle GC2 auto-connect change."""
+        self.settings.gc2.auto_connect = value
+        self.save_settings()
+
+    def _on_gspro_auto_connect_change(self, value: bool) -> None:
+        """Handle GSPro auto-connect change."""
+        self.settings.gspro.auto_connect = value
+        self.save_settings()
+
+    def _on_save_settings_click(self) -> None:
+        """Handle explicit save settings button click."""
+        self.save_settings()
+        ui.notify('Settings saved!', type='positive')
+
+    def _build_shot_display(self) -> None:
         """Build the current shot display panel."""
         with ui.card().classes('w-full h-full'):
             ui.label('Current Shot').classes('text-lg font-bold')
@@ -175,13 +306,13 @@ class GC2ConnectApp:
                 ui.label(value).classes('text-xl font-bold')
                 ui.label(unit).classes('text-sm text-gray-400 ml-1')
 
-    def _add_to_history(self, shot: GC2ShotData):
+    def _add_to_history(self, shot: GC2ShotData) -> None:
         """Add a shot to the history list."""
         self.shot_history.insert(0, shot)
 
-        # Keep only last 50 shots
-        if len(self.shot_history) > 50:
-            self.shot_history = self.shot_history[:50]
+        # Keep only up to history_limit shots
+        if len(self.shot_history) > self.history_limit:
+            self.shot_history = self.shot_history[:self.history_limit]
 
         self._refresh_history()
 

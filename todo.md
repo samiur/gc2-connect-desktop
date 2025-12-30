@@ -47,10 +47,10 @@ Started: 2025-12-30
   - [x] Platform-specific paths
   - [x] Load/save functionality
 
-- [ ] **Prompt 7**: Integrate Settings into UI
-  - [ ] Load settings on startup
-  - [ ] Save settings on change
-  - [ ] Add settings panel
+- [x] **Prompt 7**: Integrate Settings into UI
+  - [x] Load settings on startup
+  - [x] Save settings on change
+  - [x] Add settings panel
 
 ---
 
