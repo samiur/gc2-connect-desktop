@@ -41,11 +41,11 @@ Started: 2025-12-30
 
 ## Phase 2: Configuration & Settings
 
-- [ ] **Prompt 6**: Settings Module Implementation
-  - [ ] Write tests first (TDD)
-  - [ ] Implement Settings class
-  - [ ] Platform-specific paths
-  - [ ] Load/save functionality
+- [x] **Prompt 6**: Settings Module Implementation
+  - [x] Write tests first (TDD)
+  - [x] Implement Settings class
+  - [x] Platform-specific paths
+  - [x] Load/save functionality
 
 - [ ] **Prompt 7**: Integrate Settings into UI
   - [ ] Load settings on startup
