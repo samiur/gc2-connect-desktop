@@ -5,16 +5,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 
 @dataclass
 class GC2ShotData:
     """Shot data from the GC2 launch monitor."""
-    
+
     shot_id: int = 0
     timestamp: datetime = field(default_factory=datetime.now)
-    
+
     # Ball data
     ball_speed: float = 0.0          # mph
     launch_angle: float = 0.0        # degrees (vertical)
@@ -22,33 +21,33 @@ class GC2ShotData:
     total_spin: float = 0.0          # RPM
     back_spin: float = 0.0           # RPM
     side_spin: float = 0.0           # RPM
-    
+
     # Club data (HMT)
-    club_speed: Optional[float] = None       # mph
-    swing_path: Optional[float] = None       # degrees
-    angle_of_attack: Optional[float] = None  # degrees
-    face_to_target: Optional[float] = None   # degrees
-    lie: Optional[float] = None              # degrees
-    dynamic_loft: Optional[float] = None     # degrees
-    horizontal_impact: Optional[float] = None  # mm
-    vertical_impact: Optional[float] = None    # mm
-    closure_rate: Optional[float] = None     # deg/sec
-    
+    club_speed: float | None = None       # mph
+    swing_path: float | None = None       # degrees
+    angle_of_attack: float | None = None  # degrees
+    face_to_target: float | None = None   # degrees
+    lie: float | None = None              # degrees
+    dynamic_loft: float | None = None     # degrees
+    horizontal_impact: float | None = None  # mm
+    vertical_impact: float | None = None    # mm
+    closure_rate: float | None = None     # deg/sec
+
     # Flags
     has_hmt: bool = False
-    
+
     @property
     def spin_axis(self) -> float:
         """Calculate spin axis from back/side spin components."""
         if self.back_spin == 0:
             return 0.0
         return math.degrees(math.atan2(self.side_spin, self.back_spin))
-    
+
     @property
     def has_club_data(self) -> bool:
         """Check if club data is available."""
         return self.club_speed is not None
-    
+
     def is_valid(self) -> bool:
         """Check if shot data appears valid (not a misread)."""
         # Reject zero spin shots as misreads
@@ -58,12 +57,12 @@ class GC2ShotData:
         if self.ball_speed < 10 or self.ball_speed > 250:
             return False
         return True
-    
+
     @classmethod
     def from_gc2_dict(cls, data: dict[str, str]) -> GC2ShotData:
         """Parse GC2 USB text data into a ShotData object."""
         shot = cls()
-        
+
         # Field mapping from GC2 protocol
         field_map = {
             'SHOT_ID': ('shot_id', int),
@@ -84,14 +83,14 @@ class GC2ShotData:
             'CLOSING_RATE_DEGSEC': ('closure_rate', float),
             'HMT': ('has_hmt', lambda x: x.lower() in ('1', 'true', 'yes')),
         }
-        
+
         for gc2_key, (attr, converter) in field_map.items():
             if gc2_key in data:
                 try:
                     setattr(shot, attr, converter(data[gc2_key]))
                 except (ValueError, TypeError):
                     pass
-        
+
         return shot
 
 
@@ -143,7 +142,7 @@ class GSProShotMessage:
     BallData: GSProBallData = field(default_factory=GSProBallData)
     ClubData: GSProClubData = field(default_factory=GSProClubData)
     ShotDataOptions: GSProShotOptions = field(default_factory=GSProShotOptions)
-    
+
     @classmethod
     def from_gc2_shot(cls, shot: GC2ShotData, shot_number: int) -> GSProShotMessage:
         """Convert GC2 shot data to GSPro message format."""
@@ -157,10 +156,10 @@ class GSProShotMessage:
             VLA=shot.launch_angle,
             CarryDistance=0,
         )
-        
+
         club_data = GSProClubData()
         has_club = False
-        
+
         if shot.has_club_data:
             has_club = True
             club_data = GSProClubData(
@@ -175,19 +174,19 @@ class GSProShotMessage:
                 HorizontalFaceImpact=shot.horizontal_impact or 0,
                 ClosureRate=shot.closure_rate or 0,
             )
-        
+
         options = GSProShotOptions(
             ContainsBallData=True,
             ContainsClubData=has_club,
         )
-        
+
         return cls(
             ShotNumber=shot_number,
             BallData=ball_data,
             ClubData=club_data,
             ShotDataOptions=options,
         )
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -232,12 +231,12 @@ class GSProResponse:
     """Response from GSPro API."""
     Code: int = 0
     Message: str = ""
-    Player: Optional[dict] = None
-    
+    Player: dict | None = None
+
     @property
     def is_success(self) -> bool:
         return 200 <= self.Code < 300
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> GSProResponse:
         return cls(
