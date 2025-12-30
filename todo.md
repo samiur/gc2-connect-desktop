@@ -31,11 +31,11 @@ Started: 2025-12-30
   - [x] Test validation
   - [x] Test edge cases
 
-- [ ] **Prompt 5**: Unit Tests for GSPro Client
-  - [ ] Test initialization
-  - [ ] Test connection state
-  - [ ] Test message formatting
-  - [ ] Mock socket operations
+- [x] **Prompt 5**: Unit Tests for GSPro Client
+  - [x] Test initialization
+  - [x] Test connection state
+  - [x] Test message formatting
+  - [x] Mock socket operations
 
 ---
 
