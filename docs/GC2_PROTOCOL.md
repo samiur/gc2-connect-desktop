@@ -59,6 +59,8 @@ Always wait for the spin component fields before processing a shot.
 
 These fields are only present when the GC2 is equipped with the HMT (Head Measurement Technology) add-on.
 
+**Wait for HMT Option:** The gc2_to_TGC application includes a "Wait for HMT" checkbox. When enabled, shot processing waits for club data to arrive before sending to the simulator. This is useful when you want complete club metrics for each shot.
+
 | Field | Type | Unit | Description | Range |
 |-------|------|------|-------------|-------|
 | `CLUBSPEED_MPH` | float | mph | Club head speed | 0-150 |
@@ -121,7 +123,7 @@ import math
 def calculate_spin_axis(back_spin: float, side_spin: float) -> float:
     """
     Calculate spin axis from spin components.
-    
+
     Returns:
         Spin axis in degrees
         Positive = fade/slice spin axis (tilted right)
@@ -132,15 +134,53 @@ def calculate_spin_axis(back_spin: float, side_spin: float) -> float:
     return math.degrees(math.atan2(side_spin, back_spin))
 ```
 
+### Face to Path (HMT)
+
+When using HMT data with some simulators, you may need to calculate face-to-path from the raw values. The gc2_to_TGC application applies these transformations for the ProTee interface:
+
+```python
+def calculate_club_metrics(swing_path: float, face_to_target: float) -> tuple[float, float]:
+    """
+    Calculate club metrics with sign conventions for simulator output.
+
+    Note: The sign conventions may vary between simulators. These are
+    the transformations used by gc2_to_TGC for ProTee/TGC.
+
+    Returns:
+        (club_path, face_to_path) - transformed values
+    """
+    # Negate swing path for output
+    club_path = -1.0 * swing_path
+
+    # Face to path = -(face_to_target) - club_path
+    face_to_path = -1.0 * face_to_target - club_path
+
+    return club_path, face_to_path
+```
+
+**Important:** GSPro may use different sign conventions. Test with your specific setup.
+
 ## Data Validation
 
 ### Misread Detection
 
-The GC2 occasionally produces misreads that should be rejected:
+The GC2 occasionally produces misreads that should be rejected (from gc2_to_TGC implementation):
 
-1. **Zero Spin**: `SPIN_RPM == 0` indicates a misread
-2. **2222 Pattern**: `BACK_RPM == 2222` is a known error pattern
+1. **Zero Total Spin**: Reject if `BACK_RPM == 0` AND `SIDE_RPM == 0` (not just total spin)
+2. **2222 Pattern**: `BACK_RPM == 2222` is a known error code indicating misread
 3. **Unrealistic Speed**: `SPEED_MPH < 10` or `SPEED_MPH > 250`
+
+```python
+def is_misread(back_spin: float, side_spin: float) -> bool:
+    """Detect GC2 misreads that should be rejected."""
+    # Zero total spin = camera couldn't track the ball
+    if back_spin == 0.0 and side_spin == 0.0:
+        return True
+    # 2222 is a specific error code from the GC2
+    if back_spin == 2222.0:
+        return True
+    return False
+```
 
 ### Duplicate Detection
 
@@ -303,6 +343,22 @@ Note: The same shot may be sent multiple times with different `MSEC_SINCE_CONTAC
 | GC2 Powered Off | USB device disappears |
 | Camera Obscured | May produce misreads (zero spin) |
 | Low Battery | GC2 may disconnect unexpectedly |
+
+## Internal Field Mappings
+
+The gc2_to_TGC application uses these internal field names in its callback (mapped from USB protocol fields):
+
+| Internal Name | USB Field | Description |
+|---------------|-----------|-------------|
+| `ball_speed` | `SPEED_MPH` | Ball speed |
+| `horizontal_launch_angle` | `AZIMUTH_DEG` | Horizontal launch direction |
+| `launch_angle` | `ELEVATION_DEG` | Vertical launch angle |
+| `back_spin` | `BACK_RPM` | Backspin component |
+| `side_spin` | `SIDE_RPM` | Sidespin component |
+| `club_speed` | `CLUBSPEED_MPH` | Club head speed (HMT) |
+| `swing_path` | `HPATH_DEG` | Horizontal club path (HMT) |
+| `face_to_target` | `FACE_T_DEG` | Face angle to target (HMT) |
+| `horizontal_impact_location` | `HIMPACT_MM` | Sweet spot location (HMT) |
 
 ## References
 
