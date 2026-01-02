@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 from nicegui import ui
@@ -15,9 +16,10 @@ from gc2_connect.gc2.usb_reader import GC2USBReader, MockGC2Reader
 from gc2_connect.gspro.client import GSProClient
 from gc2_connect.models import GC2ShotData
 
-# Configure logging
+# Configure logging (set GC2_DEBUG=1 for verbose USB debugging)
+log_level = logging.DEBUG if os.environ.get('GC2_DEBUG') else logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
