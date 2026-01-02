@@ -366,7 +366,9 @@ class TestGC2USBReaderProperties:
         assert gc2_reader.is_running is False
         assert gc2_reader.last_shot_id == 0
         assert gc2_reader.dev is None
-        assert gc2_reader.endpoint is None
+        assert gc2_reader.endpoint_in is None
+        assert gc2_reader.endpoint_out is None
+        assert gc2_reader.endpoint_intr is None
 
     def test_callbacks_list_empty_initially(self, gc2_reader: GC2USBReader) -> None:
         """Callbacks list should be empty initially."""

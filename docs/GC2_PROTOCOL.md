@@ -16,11 +16,20 @@ The Foresight GC2 launch monitor communicates via USB using a simple text-based 
 ## USB Communication
 
 ### Interface Type
-- USB Bulk Transfer
-- Primary data direction: Device → Host (IN endpoint)
+
+The GC2 exposes multiple USB endpoints:
+
+| Endpoint | Address | Type | Direction | Description |
+|----------|---------|------|-----------|-------------|
+| BULK OUT | 0x07 | Bulk | Host → Device | Commands (if any) |
+| BULK IN | 0x88 | Bulk | Device → Host | Data transfer |
+| INTERRUPT IN | 0x82 | Interrupt | Device → Host | **Primary shot data** |
+
+**Note:** Shot data is received on the INTERRUPT IN endpoint (0x82), not the BULK endpoint.
 
 ### Data Format
 - Encoding: ASCII text
+- Packet size: 64 bytes (data split across multiple packets)
 - Line separator: Newline (`\n`)
 - Field format: `KEY=VALUE`
 
@@ -31,12 +40,20 @@ The Foresight GC2 launch monitor communicates via USB using a simple text-based 
 | Field | Type | Unit | Description | Range |
 |-------|------|------|-------------|-------|
 | `SHOT_ID` | int | - | Unique shot identifier | 1+ |
+| `TIME_SEC` | int | s | Shot timestamp (usually 0) | 0+ |
+| `MSEC_SINCE_CONTACT` | int | ms | Time since ball contact | 0-1000+ |
 | `SPEED_MPH` | float | mph | Ball speed off clubface | 0-250 |
 | `ELEVATION_DEG` | float | degrees | Vertical launch angle | -10 to 60 |
 | `AZIMUTH_DEG` | float | degrees | Horizontal launch angle (+ = right) | -45 to 45 |
 | `SPIN_RPM` | float | rpm | Total spin rate | 0-15000 |
 | `BACK_RPM` | float | rpm | Backspin component | 0-15000 |
 | `SIDE_RPM` | float | rpm | Sidespin component (+ = fade) | -5000 to 5000 |
+
+**Note:** The GC2 sends multiple updates per shot:
+- **Early reading** (~200ms): Initial ball detection, may have incomplete data
+- **Final reading** (1000ms): Complete data including spin components (`BACK_RPM`, `SIDE_RPM`)
+
+Always wait for the spin component fields before processing a shot.
 
 ### Club Data (HMT Only)
 
@@ -53,6 +70,7 @@ These fields are only present when the GC2 is equipped with the HMT (Head Measur
 | `HIMPACT_MM` | float | mm | Horizontal impact location | -30 to 30 |
 | `VIMPACT_MM` | float | mm | Vertical impact location | -30 to 30 |
 | `CLOSING_RATE_DEGSEC` | float | deg/s | Face closure rate | 0-2000 |
+| `FAXIS_DEG` | float | degrees | Face axis at impact | -15 to 15 |
 | `HMT` | int | boolean | HMT data present flag | 0 or 1 |
 
 ## Example Data
@@ -214,12 +232,68 @@ function parseGC2Data(rawData: string): Record<string, number | boolean> {
 - Requires entitlements from Apple
 - Runs as user-space driver extension
 
+## USB Message Structure
+
+The GC2 sends data in 64-byte USB packets over the INTERRUPT IN endpoint (0x82). Each shot generates multiple message types.
+
+### Message Types
+
+| Prefix | Name | Description |
+|--------|------|-------------|
+| `0H` | Shot Header | Shot metrics (speed, spin, launch angle, etc.) |
+| `0M` | Ball Movement | Real-time ball tracking/position updates |
+
+### 0H Messages (Shot Data)
+
+Contains the actual shot metrics. Fields are split across multiple 64-byte packets:
+
+```
+0H
+SHOT_ID=1
+TIME_SEC=0
+MSEC_SINCE_CONTACT=1000
+SPEED_MPH=145.20
+AZIMUTH_DEG=1.50
+ELEVATION_DEG=11.80
+SPIN_RPM=2650
+BACK_RPM=2480
+SIDE_RPM=-320
+```
+
+### 0M Messages (Ball Tracking)
+
+Real-time ball position updates during flight through the camera's field of view. These messages are sent while the ball is being tracked and typically contain position/detection data rather than final shot metrics.
+
+**Recommendation:** Skip 0M messages when parsing shot data. Only accumulate fields from 0H messages.
+
+### Data Accumulation Strategy
+
+Shot data is split across multiple USB packets. The recommended approach (based on gc2_to_TGC implementation):
+
+1. **Filter by message type**: Only process `0H` messages, skip `0M` messages
+2. **Accumulate fields**: Parse key=value pairs into a dictionary, accumulating across packets
+3. **Wait for complete data**: Don't process until `BACK_RPM` or `SIDE_RPM` is received
+4. **Detect new shots**: When `SHOT_ID` changes, clear the accumulator and start fresh
+5. **Handle timeouts**: If spin components never arrive (~500ms), process with available data
+
+Example packet sequence for one shot:
+```
+Packet 1: 0H\nSHOT_ID=1\nTIME_SEC=0\nMSEC_SINCE_CONTACT=200\nSPEED_MPH=145.
+Packet 2: 20\nAZIMUTH_DEG=1.50\nELEVATION_DEG=11.80\nSPIN_RPM=2650\n
+Packet 3: 0H\nSHOT_ID=1\nTIME_SEC=0\nMSEC_SINCE_CONTACT=1000\nSPEED_MPH=145.
+Packet 4: 20\nAZIMUTH_DEG=1.50\nELEVATION_DEG=11.80\nSPIN_RPM=2650\nBACK_
+Packet 5: RPM=2480\nSIDE_RPM=-320\n
+```
+
+Note: The same shot may be sent multiple times with different `MSEC_SINCE_CONTACT` values as measurements are refined.
+
 ## Timing Considerations
 
 - Shot data is sent immediately after each shot
-- Data may arrive in fragments; buffer until complete message received
+- Data arrives in multiple 64-byte fragments; accumulate until complete
+- The GC2 sends early readings (~200ms) and final readings (~1000ms)
 - No heartbeat or polling required - GC2 pushes data on shot detection
-- Typical latency: < 50ms from ball impact to data availability
+- Typical latency: < 50ms from ball impact to first data packet
 
 ## Error Conditions
 
@@ -235,3 +309,4 @@ function parseGC2Data(rawData: string): Record<string, number | boolean> {
 - USB 2.0 Specification
 - Foresight Sports GC2 User Manual
 - GSPro Open Connect API v1 Documentation
+- gc2_to_TGC application (reverse engineered for protocol details)
