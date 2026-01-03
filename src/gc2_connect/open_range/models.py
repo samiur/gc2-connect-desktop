@@ -85,37 +85,23 @@ class TrajectoryPoint(BaseModel):
     t: Annotated[float, Field(description="Time in seconds")] = 0.0
     x: Annotated[float, Field(description="Forward distance in yards")] = 0.0
     y: Annotated[float, Field(description="Height in feet")] = 0.0
-    z: Annotated[float, Field(description="Lateral distance in yards (+ = right)")] = (
-        0.0
-    )
-    phase: Annotated[Phase, Field(description="Current phase of ball motion")] = (
-        Phase.FLIGHT
-    )
+    z: Annotated[float, Field(description="Lateral distance in yards (+ = right)")] = 0.0
+    phase: Annotated[Phase, Field(description="Current phase of ball motion")] = Phase.FLIGHT
 
 
 class ShotSummary(BaseModel):
     """Shot outcome metrics."""
 
-    carry_distance: Annotated[float, Field(description="Carry distance in yards")] = (
-        0.0
-    )
-    total_distance: Annotated[float, Field(description="Total distance in yards")] = (
-        0.0
-    )
+    carry_distance: Annotated[float, Field(description="Carry distance in yards")] = 0.0
+    total_distance: Annotated[float, Field(description="Total distance in yards")] = 0.0
     roll_distance: Annotated[float, Field(description="Roll distance in yards")] = 0.0
     offline_distance: Annotated[
         float, Field(description="Lateral distance (+ right, - left) in yards")
     ] = 0.0
     max_height: Annotated[float, Field(description="Maximum height in feet")] = 0.0
-    max_height_time: Annotated[
-        float, Field(description="Time to max height in seconds")
-    ] = 0.0
-    flight_time: Annotated[
-        float, Field(description="Time to first landing in seconds")
-    ] = 0.0
-    total_time: Annotated[float, Field(description="Total time to stop in seconds")] = (
-        0.0
-    )
+    max_height_time: Annotated[float, Field(description="Time to max height in seconds")] = 0.0
+    flight_time: Annotated[float, Field(description="Time to first landing in seconds")] = 0.0
+    total_time: Annotated[float, Field(description="Total time to stop in seconds")] = 0.0
     bounce_count: Annotated[int, Field(description="Number of bounces")] = 0
 
 
@@ -124,9 +110,7 @@ class LaunchData(BaseModel):
 
     ball_speed: Annotated[float, Field(description="Ball speed in mph")] = 0.0
     vla: Annotated[float, Field(description="Vertical launch angle in degrees")] = 0.0
-    hla: Annotated[float, Field(description="Horizontal launch angle in degrees")] = (
-        0.0
-    )
+    hla: Annotated[float, Field(description="Horizontal launch angle in degrees")] = 0.0
     backspin: Annotated[float, Field(description="Backspin in rpm")] = 0.0
     sidespin: Annotated[float, Field(description="Sidespin in rpm")] = 0.0
 
@@ -157,9 +141,7 @@ class Conditions(BaseModel):
 class ShotResult(BaseModel):
     """Complete simulation result."""
 
-    trajectory: Annotated[
-        list[TrajectoryPoint], Field(description="List of trajectory points")
-    ]
+    trajectory: Annotated[list[TrajectoryPoint], Field(description="List of trajectory points")]
     summary: Annotated[ShotSummary, Field(description="Shot summary metrics")]
     launch_data: Annotated[LaunchData, Field(description="Input launch conditions")]
     conditions: Annotated[Conditions, Field(description="Environmental conditions")]
