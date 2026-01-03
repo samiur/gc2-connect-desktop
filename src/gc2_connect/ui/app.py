@@ -18,6 +18,7 @@ from gc2_connect.config.settings import Settings, get_settings_path
 from gc2_connect.gc2.usb_reader import GC2USBReader, MockGC2Reader
 from gc2_connect.gspro.client import GSProClient
 from gc2_connect.models import GC2BallStatus, GC2ShotData
+from gc2_connect.services.history import ShotHistoryManager
 from gc2_connect.utils.reconnect import ReconnectionManager, ReconnectionState
 
 # Configure logging (set GC2_DEBUG=1 for verbose USB debugging)
@@ -37,10 +38,9 @@ class GC2ConnectApp:
         # State (initialized from settings)
         self.gc2_reader: GC2USBReader | MockGC2Reader | None = None
         self.gspro_client: GSProClient | None = None
-        self.shot_history: list[GC2ShotData] = []
+        self.shot_history = ShotHistoryManager(limit=self.settings.ui.history_limit)
         self.auto_send = True
         self.use_mock_gc2 = self.settings.gc2.use_mock
-        self.history_limit = self.settings.ui.history_limit
 
         # UI references (typed as Any due to NiceGUI's dynamic nature)
         self.gc2_status_label: Any = None
@@ -53,6 +53,9 @@ class GC2ConnectApp:
         self.gspro_port_input: Any = None
         self.history_limit_input: Any = None
         self.settings_path_label: Any = None
+        self.history_count_label: Any = None
+        self.stats_avg_speed_label: Any = None
+        self.stats_avg_spin_label: Any = None
 
         # Ball status state
         self.send_status_to_gspro = True
@@ -262,9 +265,12 @@ class GC2ConnectApp:
 
     def update_history_limit(self, limit: int) -> None:
         """Update history limit and save settings."""
-        self.history_limit = limit
+        self.shot_history.limit = limit
         self.settings.ui.history_limit = limit
         self.save_settings()
+        # Only refresh if UI has been built
+        if self.history_list is not None:
+            self._refresh_history()
 
     def build_ui(self) -> None:
         """Build the NiceGUI interface."""
@@ -375,7 +381,7 @@ class GC2ConnectApp:
                 with ui.row().classes("items-center gap-2 mt-2"):
                     ui.label("History Limit:")
                     self.history_limit_input = ui.number(
-                        value=self.history_limit,
+                        value=self.shot_history.limit,
                         min=10,
                         max=500,
                         step=10,
@@ -448,11 +454,25 @@ class GC2ConnectApp:
         with ui.card().classes("w-full h-full"):
             with ui.row().classes("items-center justify-between w-full"):
                 ui.label("Shot History").classes("text-lg font-bold")
+                self.history_count_label = ui.label(
+                    self.shot_history.format_count_display()
+                ).classes("text-sm text-gray-400")
                 ui.button("Clear", on_click=self._clear_history).props("flat size=sm")
 
             ui.separator()
 
-            self.history_list = ui.column().classes("w-full max-h-96 overflow-y-auto")
+            # Session statistics
+            with ui.row().classes("w-full gap-4 mb-2"):
+                with ui.column().classes("flex-1"):
+                    ui.label("Avg Speed").classes("text-xs text-gray-400")
+                    self.stats_avg_speed_label = ui.label("-- mph").classes("text-sm font-semibold")
+                with ui.column().classes("flex-1"):
+                    ui.label("Avg Spin").classes("text-xs text-gray-400")
+                    self.stats_avg_spin_label = ui.label("-- rpm").classes("text-sm font-semibold")
+
+            ui.separator()
+
+            self.history_list = ui.column().classes("w-full max-h-80 overflow-y-auto")
 
     def _update_shot_display(self, shot: GC2ShotData) -> None:
         """Update the shot display with new data."""
@@ -496,20 +516,33 @@ class GC2ConnectApp:
 
     def _add_to_history(self, shot: GC2ShotData) -> None:
         """Add a shot to the history list."""
-        self.shot_history.insert(0, shot)
-
-        # Keep only up to history_limit shots
-        if len(self.shot_history) > self.history_limit:
-            self.shot_history = self.shot_history[: self.history_limit]
-
+        self.shot_history.add_shot(shot)
         self._refresh_history()
 
     def _refresh_history(self) -> None:
         """Refresh the history list display."""
         self.history_list.clear()
 
+        # Update count display
+        if self.history_count_label:
+            self.history_count_label.text = self.shot_history.format_count_display()
+
+        # Update statistics
+        stats = self.shot_history.get_statistics()
+        if self.stats_avg_speed_label:
+            if stats["count"] > 0:
+                self.stats_avg_speed_label.text = f"{stats['avg_ball_speed']:.1f} mph"
+            else:
+                self.stats_avg_speed_label.text = "-- mph"
+        if self.stats_avg_spin_label:
+            if stats["count"] > 0:
+                self.stats_avg_spin_label.text = f"{stats['avg_total_spin']:.0f} rpm"
+            else:
+                self.stats_avg_spin_label.text = "-- rpm"
+
+        # Render shot list (limit to 20 for performance but use full history for stats)
         with self.history_list:
-            for shot in self.shot_history[:20]:
+            for shot in self.shot_history.shots[:20]:
                 with ui.row().classes("w-full bg-gray-800 rounded p-2 mb-1 items-center"):
                     ui.label(f"#{shot.shot_id}").classes("text-sm text-gray-400 w-12")
                     ui.label(f"{shot.ball_speed:.1f} mph").classes("text-sm font-bold w-20")

@@ -80,7 +80,7 @@ class TestSettingsLoadOnInit:
 
         # State should match settings
         assert app.use_mock_gc2 is True
-        assert app.history_limit == 25
+        assert app.shot_history.limit == 25
 
 
 class TestSettingsInputValues:
@@ -195,7 +195,7 @@ class TestSettingsSave:
         # Verify saved values
         data = json.loads(settings_path.read_text())
         assert data["ui"]["history_limit"] == 75
-        assert app.history_limit == 75
+        assert app.shot_history.limit == 75
 
 
 class TestSettingsRoundtrip:
@@ -227,7 +227,7 @@ class TestSettingsRoundtrip:
         assert app2.settings.gc2.use_mock is True
         assert app2.settings.ui.history_limit == 99
         assert app2.use_mock_gc2 is True
-        assert app2.history_limit == 99
+        assert app2.shot_history.limit == 99
 
 
 class TestSettingsPath:
