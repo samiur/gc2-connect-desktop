@@ -424,14 +424,19 @@ class GC2USBReader:
                         # Shot-relevant packets at INFO, others at DEBUG
                         is_shot_data = 'SHOT_ID' in text or 'SPIN_RPM' in text or 'BACK_RPM' in text or 'SIDE_RPM' in text
                         is_tracking = '0M' in text
+                        ends_with_terminator = text.endswith('\n\t') or text.endswith('\t')
 
                         if is_shot_data:
-                            logger.info(f"USB RX [{ep_name}] ({len(data)} bytes): {text!r}")
+                            logger.info(f"USB RX [{ep_name}] ({len(data)} bytes) [term={ends_with_terminator}]: {text!r}")
                         elif is_tracking:
                             logger.debug(f"USB RX [{ep_name}] 0M tracking: {text!r}")
                         else:
                             # Log ALL other packets so we can see what's being received
-                            logger.info(f"USB RX [{ep_name}] ({len(data)} bytes) OTHER: {text!r}")
+                            logger.info(f"USB RX [{ep_name}] ({len(data)} bytes) [term={ends_with_terminator}] OTHER: {text!r}")
+
+                        # Debug: log line buffer state when processing shot data
+                        if is_shot_data and line_buffer:
+                            logger.debug(f"Line buffer before parse: {line_buffer!r}")
 
                         # Always update line buffer to handle values split across packets
                         # But only accumulate fields from 0H (shot data) messages
@@ -446,6 +451,12 @@ class GC2USBReader:
                         shot_accumulator, line_buffer = self._parse_gc2_fields(
                             text, shot_accumulator, line_buffer
                         )
+
+                        # Debug: show accumulator state after parsing shot data
+                        if is_shot_data:
+                            logger.debug(f"Accumulator after parse: {list(shot_accumulator.keys())}")
+                            if line_buffer:
+                                logger.debug(f"Line buffer after parse: {line_buffer!r}")
 
                         # Check if message is complete (ends with \n\t)
                         # GC2 messages terminate with \n\t as the final delimiter
