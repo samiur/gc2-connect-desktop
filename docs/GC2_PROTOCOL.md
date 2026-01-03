@@ -75,6 +75,17 @@ These fields are only present when the GC2 is equipped with the HMT (Head Measur
 | `FAXIS_DEG` | float | degrees | Face axis at impact | -15 to 15 |
 | `HMT` | int | boolean | HMT data present flag | 0 or 1 |
 
+### Ball Position Data (Always Present)
+
+These fields indicate the ball's starting position in world coordinates:
+
+| Field | Type | Unit | Description |
+|-------|------|------|-------------|
+| `IS_LEFT` | int | boolean | Left-handed shot flag (0=right, 1=left) |
+| `WORLDSTART_X` | float | mm | Ball starting X position |
+| `WORLDSTART_Y` | float | mm | Ball starting Y position |
+| `WORLDSTART_Z` | float | mm | Ball starting Z position |
+
 ## Example Data
 
 ### Ball Only (No HMT)
@@ -87,6 +98,11 @@ AZIMUTH_DEG=1.5
 SPIN_RPM=2650
 BACK_RPM=2480
 SIDE_RPM=-320
+IS_LEFT=0
+WORLDSTART_X=-53.53
+WORLDSTART_Y=91.40
+WORLDSTART_Z=-477.94
+HMT=0
 ```
 
 ### Full Data (With HMT)
