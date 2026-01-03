@@ -95,13 +95,13 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Create open_range/physics/constants.py
   - [x] Match docs/PHYSICS.md specifications
 
-- [ ] **Prompt 13**: Aerodynamics Module
-  - [ ] Write tests for Cd, Cl, air density
-  - [ ] Create open_range/physics/aerodynamics.py
-  - [ ] Implement Reynolds number calculation
-  - [ ] Implement drag coefficient (piecewise linear)
-  - [ ] Implement lift coefficient (quadratic formula)
-  - [ ] Implement air density calculation
+- [x] **Prompt 13**: Aerodynamics Module
+  - [x] Write tests for Cd, Cl, air density
+  - [x] Create open_range/physics/aerodynamics.py
+  - [x] Implement Reynolds number calculation
+  - [x] Implement drag coefficient (piecewise linear)
+  - [x] Implement lift coefficient (quadratic formula)
+  - [x] Implement air density calculation
 
 - [ ] **Prompt 14**: Trajectory Simulation (RK4)
   - [ ] Write tests for flight physics
