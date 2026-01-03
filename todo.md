@@ -111,12 +111,12 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Implement wind model
   - [x] Validate against Nathan model data
 
-- [ ] **Prompt 15**: Ground Physics (Bounce/Roll)
-  - [ ] Write tests for bounce and roll
-  - [ ] Create open_range/physics/ground.py
-  - [ ] Implement bounce physics (COR, friction)
-  - [ ] Implement roll physics (deceleration)
-  - [ ] Test surface types (Fairway, Rough, Green)
+- [x] **Prompt 15**: Ground Physics (Bounce/Roll)
+  - [x] Write tests for bounce and roll
+  - [x] Create open_range/physics/ground.py
+  - [x] Implement bounce physics (COR, friction)
+  - [x] Implement roll physics (deceleration)
+  - [x] Test surface types (Fairway, Rough, Green)
 
 - [ ] **Prompt 16**: Physics Engine Integration
   - [ ] Write validation tests (driver, 7-iron, wedge)
