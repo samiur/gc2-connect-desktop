@@ -327,14 +327,39 @@ class GC2USBReader:
         # Message is incomplete - wait for more data
         return None, buffer[h_start:]
 
-    def _parse_gc2_fields(self, text: str, accumulator: dict[str, str]) -> dict[str, str]:
+    def _parse_gc2_fields(
+        self, text: str, accumulator: dict[str, str], line_buffer: str
+    ) -> tuple[dict[str, str], str]:
         """
         Parse GC2 field data and accumulate into dictionary.
 
         This mimics the gc2_to_TGC approach where data is accumulated
         across multiple USB reads until a complete shot is received.
+
+        Handles partial lines split across 64-byte USB packets by buffering
+        incomplete lines until the next packet completes them.
+
+        Args:
+            text: Raw text from current USB packet
+            accumulator: Dictionary to accumulate key=value pairs into
+            line_buffer: Any incomplete line from previous packet
+
+        Returns:
+            (accumulator, remaining_buffer) - remaining_buffer contains any
+            incomplete line at the end of the current packet
         """
-        for line in text.split('\n'):
+        # Prepend any incomplete line from previous packet
+        full_text = line_buffer + text
+
+        # Split into lines - lines ending with \n are complete
+        lines = full_text.split('\n')
+
+        # The last element might be incomplete (no trailing \n)
+        # Keep it in the buffer for the next packet
+        remaining = lines[-1] if not full_text.endswith('\n') else ''
+        complete_lines = lines[:-1] if not full_text.endswith('\n') else lines
+
+        for line in complete_lines:
             line = line.strip()
             if '=' not in line:
                 continue
@@ -343,7 +368,8 @@ class GC2USBReader:
             value = value.strip()
             if key and value:
                 accumulator[key] = value
-        return accumulator
+
+        return accumulator, remaining
 
     async def read_loop(self, timeout: int = 1000):
         """Async read loop - reads shots from USB and calls callbacks."""
@@ -353,6 +379,7 @@ class GC2USBReader:
 
         self._running = True
         shot_accumulator: dict[str, str] = {}  # Accumulate fields across packets
+        line_buffer = ""  # Buffer for incomplete lines split across packets
         timeout_count = 0
         spin_wait_count = 0  # Count iterations waiting for spin components
         MAX_SPIN_WAIT = 50  # ~500ms at 10ms per iteration
@@ -390,17 +417,26 @@ class GC2USBReader:
                     # Convert to string
                     text = ''.join(chr(x) for x in data if x != 0)
 
-                    # Log all received data for debugging
-                    if '0M' in text:
-                        # 0M messages are ball tracking/position - log for analysis
-                        logger.debug(f"USB RX [{ep_name}] 0M tracking: {text!r}")
-                        # Don't accumulate 0M data into shot accumulator
-                        continue
-                    elif 'SHOT_ID' in text or 'SPIN_RPM' in text or 'BACK_RPM' in text or 'SIDE_RPM' in text:
+                    # Log received data for debugging
+                    if 'SHOT_ID' in text or 'SPIN_RPM' in text or 'BACK_RPM' in text or 'SIDE_RPM' in text:
                         logger.info(f"USB RX [{ep_name}] ({len(data)} bytes): {text!r}")
+                    elif '0M' in text:
+                        # 0M messages are ball tracking/position - log at debug level
+                        logger.debug(f"USB RX [{ep_name}] 0M tracking: {text!r}")
 
-                    # Only accumulate fields from 0H (shot data) packets
-                    self._parse_gc2_fields(text, shot_accumulator)
+                    # Always update line buffer to handle values split across packets
+                    # But only accumulate fields from 0H (shot data) messages
+                    if '0M' in text:
+                        # For 0M messages, just update line buffer, don't accumulate
+                        # This handles cases where 0M appears mid-stream
+                        _, line_buffer = self._parse_gc2_fields(
+                            text, {}, line_buffer
+                        )
+                        continue
+
+                    shot_accumulator, line_buffer = self._parse_gc2_fields(
+                        text, shot_accumulator, line_buffer
+                    )
 
                     # Check if we have a new shot ready to process
                     current_shot_id = shot_accumulator.get('SHOT_ID')
