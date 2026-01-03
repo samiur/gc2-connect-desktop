@@ -268,7 +268,9 @@ class TestGSProClientResponseParsing:
         mock_socket: MagicMock,
     ):
         """Test that socket error sets connected to False."""
-        mock_socket.recv.side_effect = OSError("Connection reset")
+        # First recv is for initial heartbeat (success), second is for shot (error)
+        success_response = json.dumps({"Code": 200, "Message": "OK"}).encode("utf-8")
+        mock_socket.recv.side_effect = [success_response, OSError("Connection reset")]
 
         client = GSProClient()
         with patch("socket.socket", return_value=mock_socket):
@@ -311,10 +313,11 @@ class TestGSProClientCallbacks:
         """Test that callbacks are invoked when response is received."""
         client = GSProClient()
         callback = MagicMock()
-        client.add_response_callback(callback)
 
         with patch("socket.socket", return_value=mock_socket_with_success_response):
             client.connect()
+            # Add callback after connect so we only see shot responses
+            client.add_response_callback(callback)
             client.send_shot(sample_gc2_shot)
 
         callback.assert_called_once()
@@ -332,11 +335,11 @@ class TestGSProClientCallbacks:
         failing_callback = MagicMock(side_effect=Exception("Callback error"))
         working_callback = MagicMock()
 
-        client.add_response_callback(failing_callback)
-        client.add_response_callback(working_callback)
-
         with patch("socket.socket", return_value=mock_socket_with_success_response):
             client.connect()
+            # Add callbacks after connect so we only see shot responses
+            client.add_response_callback(failing_callback)
+            client.add_response_callback(working_callback)
             client.send_shot(sample_gc2_shot)
 
         # Both callbacks should have been called

@@ -66,6 +66,14 @@ class GSProClient:
             self._socket.connect((self.host, self.port))
             self._connected = True
             logger.info(f"Connected to GSPro at {self.host}:{self.port}")
+
+            # Send initial heartbeat to register the device
+            response = self.send_heartbeat()
+            if response:
+                logger.info(f"GSPro handshake successful: {response.Message}")
+            else:
+                logger.warning("No response to initial heartbeat (GSPro may still work)")
+
             return True
         except OSError as e:
             logger.error(f"Failed to connect to GSPro: {e}")
@@ -153,9 +161,9 @@ class GSProClient:
     def _send_message(self, message: GSProShotMessage) -> GSProResponse | None:
         """Send a message and receive response."""
         try:
-            # Send JSON message
+            # Send JSON message with newline delimiter (GSPro expects newline-delimited JSON)
             json_data = json.dumps(message.to_dict())
-            self._socket.sendall(json_data.encode('utf-8'))
+            self._socket.sendall((json_data + '\n').encode('utf-8'))
             logger.debug(f"Sent: {json_data}")
 
             # Receive response
