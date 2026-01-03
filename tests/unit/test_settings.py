@@ -176,9 +176,7 @@ class TestSettingsLoad:
     def test_load_creates_defaults_if_file_not_exists(self, tmp_path: Path) -> None:
         """Test that load returns defaults if file doesn't exist."""
         settings_path = tmp_path / "nonexistent" / "settings.json"
-        with patch(
-            "gc2_connect.config.settings.get_settings_path", return_value=settings_path
-        ):
+        with patch("gc2_connect.config.settings.get_settings_path", return_value=settings_path):
             settings = Settings.load()
             assert settings.version == 1
             assert settings.gspro.host == "127.0.0.1"
@@ -195,9 +193,7 @@ class TestSettingsLoad:
         }
         settings_path.write_text(json.dumps(settings_data))
 
-        with patch(
-            "gc2_connect.config.settings.get_settings_path", return_value=settings_path
-        ):
+        with patch("gc2_connect.config.settings.get_settings_path", return_value=settings_path):
             settings = Settings.load()
             assert settings.gspro.host == "192.168.1.50"
             assert settings.gspro.port == 9999
@@ -212,9 +208,7 @@ class TestSettingsLoad:
         settings_path = tmp_path / "settings.json"
         settings_path.write_text("not valid json {{{")
 
-        with patch(
-            "gc2_connect.config.settings.get_settings_path", return_value=settings_path
-        ):
+        with patch("gc2_connect.config.settings.get_settings_path", return_value=settings_path):
             settings = Settings.load()
             # Should return defaults
             assert settings.version == 1
@@ -230,9 +224,7 @@ class TestSettingsLoad:
         }
         settings_path.write_text(json.dumps(settings_data))
 
-        with patch(
-            "gc2_connect.config.settings.get_settings_path", return_value=settings_path
-        ):
+        with patch("gc2_connect.config.settings.get_settings_path", return_value=settings_path):
             settings = Settings.load()
             # Custom gspro values
             assert settings.gspro.host == "10.0.0.1"
@@ -266,9 +258,7 @@ class TestSettingsSave:
         settings_path = tmp_path / "settings.json"
         settings = Settings()
 
-        with patch(
-            "gc2_connect.config.settings.get_settings_path", return_value=settings_path
-        ):
+        with patch("gc2_connect.config.settings.get_settings_path", return_value=settings_path):
             settings.save()
 
         assert settings_path.exists()
@@ -281,9 +271,7 @@ class TestSettingsSave:
         settings_path = tmp_path / "nested" / "dirs" / "settings.json"
         settings = Settings()
 
-        with patch(
-            "gc2_connect.config.settings.get_settings_path", return_value=settings_path
-        ):
+        with patch("gc2_connect.config.settings.get_settings_path", return_value=settings_path):
             settings.save()
 
         assert settings_path.exists()
@@ -298,9 +286,7 @@ class TestSettingsSave:
             ui=UISettings(theme="light", show_history=False, history_limit=100),
         )
 
-        with patch(
-            "gc2_connect.config.settings.get_settings_path", return_value=settings_path
-        ):
+        with patch("gc2_connect.config.settings.get_settings_path", return_value=settings_path):
             settings.save()
 
         data = json.loads(settings_path.read_text())
@@ -313,9 +299,7 @@ class TestSettingsSave:
     def test_save_with_custom_path(self, tmp_path: Path) -> None:
         """Test saving to a custom path."""
         custom_path = tmp_path / "custom_settings.json"
-        settings = Settings(
-            gspro=GSProSettings(host="custom.save", port=5555, auto_connect=False)
-        )
+        settings = Settings(gspro=GSProSettings(host="custom.save", port=5555, auto_connect=False))
 
         settings.save(custom_path)
 
@@ -337,9 +321,7 @@ class TestSettingsRoundtrip:
             ui=UISettings(theme="light", show_history=False, history_limit=75),
         )
 
-        with patch(
-            "gc2_connect.config.settings.get_settings_path", return_value=settings_path
-        ):
+        with patch("gc2_connect.config.settings.get_settings_path", return_value=settings_path):
             original.save()
             loaded = Settings.load()
 
@@ -358,9 +340,7 @@ class TestSettingsRoundtrip:
         """Test multiple save/load cycles work correctly."""
         settings_path = tmp_path / "settings.json"
 
-        with patch(
-            "gc2_connect.config.settings.get_settings_path", return_value=settings_path
-        ):
+        with patch("gc2_connect.config.settings.get_settings_path", return_value=settings_path):
             # Cycle 1
             s1 = Settings(gspro=GSProSettings(host="host1", port=1111, auto_connect=False))
             s1.save()

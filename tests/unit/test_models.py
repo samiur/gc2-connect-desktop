@@ -313,8 +313,14 @@ class TestGSProShotMessageToDict:
         ball_data = result["BallData"]
 
         expected_keys = [
-            "Speed", "SpinAxis", "TotalSpin", "BackSpin",
-            "SideSpin", "HLA", "VLA", "CarryDistance"
+            "Speed",
+            "SpinAxis",
+            "TotalSpin",
+            "BackSpin",
+            "SideSpin",
+            "HLA",
+            "VLA",
+            "CarryDistance",
         ]
         for key in expected_keys:
             assert key in ball_data, f"Missing key: {key}"
@@ -325,9 +331,16 @@ class TestGSProShotMessageToDict:
         club_data = result["ClubData"]
 
         expected_keys = [
-            "Speed", "AngleOfAttack", "FaceToTarget", "Lie",
-            "Loft", "Path", "SpeedAtImpact", "VerticalFaceImpact",
-            "HorizontalFaceImpact", "ClosureRate"
+            "Speed",
+            "AngleOfAttack",
+            "FaceToTarget",
+            "Lie",
+            "Loft",
+            "Path",
+            "SpeedAtImpact",
+            "VerticalFaceImpact",
+            "HorizontalFaceImpact",
+            "ClosureRate",
         ]
         for key in expected_keys:
             assert key in club_data, f"Missing key: {key}"
@@ -338,15 +351,16 @@ class TestGSProShotMessageToDict:
         options = result["ShotDataOptions"]
 
         expected_keys = [
-            "ContainsBallData", "ContainsClubData", "LaunchMonitorIsReady",
-            "LaunchMonitorBallDetected", "IsHeartBeat"
+            "ContainsBallData",
+            "ContainsClubData",
+            "LaunchMonitorIsReady",
+            "LaunchMonitorBallDetected",
+            "IsHeartBeat",
         ]
         for key in expected_keys:
             assert key in options, f"Missing key: {key}"
 
-    def test_to_dict_values_are_correct_types(
-        self, sample_gspro_message: GSProShotMessage
-    ) -> None:
+    def test_to_dict_values_are_correct_types(self, sample_gspro_message: GSProShotMessage) -> None:
         """Values in to_dict should be correct types for JSON."""
         result = sample_gspro_message.to_dict()
 
@@ -364,7 +378,7 @@ class TestGSProResponseFromDict:
         data = {
             "Code": 200,
             "Message": "Shot received",
-            "Player": {"Name": "Player 1", "Club": "Driver"}
+            "Player": {"Name": "Player 1", "Club": "Driver"},
         }
         response = GSProResponse.from_dict(data)
 
@@ -374,10 +388,7 @@ class TestGSProResponseFromDict:
 
     def test_parse_error_response(self) -> None:
         """Parse an error response from GSPro."""
-        data = {
-            "Code": 501,
-            "Message": "Player not ready"
-        }
+        data = {"Code": 501, "Message": "Player not ready"}
         response = GSProResponse.from_dict(data)
 
         assert response.Code == 501

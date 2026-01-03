@@ -20,23 +20,17 @@ class GSProSettings(BaseModel):
 
     host: Annotated[str, Field(description="GSPro server host")] = "127.0.0.1"
     port: Annotated[int, Field(gt=0, description="GSPro server port")] = 921
-    auto_connect: Annotated[
-        bool, Field(description="Auto-connect to GSPro on startup")
-    ] = False
+    auto_connect: Annotated[bool, Field(description="Auto-connect to GSPro on startup")] = False
 
 
 class GC2Settings(BaseModel):
     """Settings for GC2 launch monitor."""
 
-    auto_connect: Annotated[
-        bool, Field(description="Auto-connect to GC2 on startup")
-    ] = True
+    auto_connect: Annotated[bool, Field(description="Auto-connect to GC2 on startup")] = True
     reject_zero_spin: Annotated[
         bool, Field(description="Reject shots with zero spin as misreads")
     ] = True
-    use_mock: Annotated[
-        bool, Field(description="Use mock GC2 reader for testing")
-    ] = False
+    use_mock: Annotated[bool, Field(description="Use mock GC2 reader for testing")] = False
 
 
 class UISettings(BaseModel):
@@ -44,24 +38,16 @@ class UISettings(BaseModel):
 
     theme: Annotated[str, Field(description="UI theme (dark or light)")] = "dark"
     show_history: Annotated[bool, Field(description="Show shot history panel")] = True
-    history_limit: Annotated[
-        int, Field(gt=0, description="Maximum shots to keep in history")
-    ] = 50
+    history_limit: Annotated[int, Field(gt=0, description="Maximum shots to keep in history")] = 50
 
 
 class Settings(BaseModel):
     """Application settings with persistence."""
 
     version: Annotated[int, Field(description="Settings schema version")] = 1
-    gspro: Annotated[
-        GSProSettings, Field(description="GSPro settings")
-    ] = GSProSettings()
-    gc2: Annotated[
-        GC2Settings, Field(description="GC2 settings")
-    ] = GC2Settings()
-    ui: Annotated[
-        UISettings, Field(description="UI settings")
-    ] = UISettings()
+    gspro: Annotated[GSProSettings, Field(description="GSPro settings")] = GSProSettings()
+    gc2: Annotated[GC2Settings, Field(description="GC2 settings")] = GC2Settings()
+    ui: Annotated[UISettings, Field(description="UI settings")] = UISettings()
 
     @classmethod
     def load(cls, path: Path | None = None) -> Settings:

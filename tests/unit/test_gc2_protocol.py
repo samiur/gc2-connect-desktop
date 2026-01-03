@@ -290,9 +290,7 @@ SIDE_RPM=-100
 class TestParseDataPartial:
     """Tests for partial data parsing."""
 
-    def test_parse_missing_spin_components_is_rejected(
-        self, gc2_reader: GC2USBReader
-    ) -> None:
+    def test_parse_missing_spin_components_is_rejected(self, gc2_reader: GC2USBReader) -> None:
         """Missing spin components default to 0, which is rejected as misread."""
         data = """
 SHOT_ID=1
@@ -303,9 +301,7 @@ SPIN_RPM=2500
         # back_spin and side_spin default to 0, which is now rejected as misread
         assert shot is None
 
-    def test_parse_with_spin_components_parses(
-        self, gc2_reader: GC2USBReader
-    ) -> None:
+    def test_parse_with_spin_components_parses(self, gc2_reader: GC2USBReader) -> None:
         """Shot with spin components should parse successfully."""
         data = """
 SHOT_ID=1
@@ -346,9 +342,7 @@ class TestDuplicateShotDetection:
         gc2_reader.last_shot_id = 5
         assert gc2_reader.last_shot_id == 5
 
-    def test_shot_with_same_id_as_last_is_duplicate(
-        self, gc2_reader: GC2USBReader
-    ) -> None:
+    def test_shot_with_same_id_as_last_is_duplicate(self, gc2_reader: GC2USBReader) -> None:
         """Shots with same ID as last_shot_id are duplicates."""
         gc2_reader.last_shot_id = 1
 
@@ -361,9 +355,7 @@ class TestDuplicateShotDetection:
         # So we just verify the shot_id matches
         assert shot.shot_id == gc2_reader.last_shot_id
 
-    def test_shot_with_different_id_is_not_duplicate(
-        self, gc2_reader: GC2USBReader
-    ) -> None:
+    def test_shot_with_different_id_is_not_duplicate(self, gc2_reader: GC2USBReader) -> None:
         """Shots with different ID are not duplicates."""
         gc2_reader.last_shot_id = 99
 
@@ -402,6 +394,7 @@ class TestGC2USBReaderProperties:
 
     def test_remove_shot_callback(self, gc2_reader: GC2USBReader) -> None:
         """Should be able to remove shot callbacks."""
+
         def my_callback(shot):
             pass
 
@@ -413,6 +406,7 @@ class TestGC2USBReaderProperties:
 
     def test_remove_nonexistent_callback_safe(self, gc2_reader: GC2USBReader) -> None:
         """Removing a callback that doesn't exist should be safe."""
+
         def my_callback(shot):
             pass
 
@@ -442,9 +436,7 @@ class TestMockGC2Reader:
         assert mock_reader.is_connected is False
         assert mock_reader.is_running is False
 
-    def test_send_test_shot_increments_shot_number(
-        self, mock_reader: MockGC2Reader
-    ) -> None:
+    def test_send_test_shot_increments_shot_number(self, mock_reader: MockGC2Reader) -> None:
         """send_test_shot should increment shot number each call."""
         mock_reader.connect()
 
@@ -464,9 +456,7 @@ class TestMockGC2Reader:
         assert shots_received[1].shot_id == 2
         assert shots_received[2].shot_id == 3
 
-    def test_send_test_shot_generates_valid_data(
-        self, mock_reader: MockGC2Reader
-    ) -> None:
+    def test_send_test_shot_generates_valid_data(self, mock_reader: MockGC2Reader) -> None:
         """send_test_shot should generate valid shot data."""
         mock_reader.connect()
 
@@ -484,9 +474,7 @@ class TestMockGC2Reader:
         assert received_shot.total_spin > 0
         assert received_shot.is_valid()
 
-    def test_send_test_shot_includes_club_data(
-        self, mock_reader: MockGC2Reader
-    ) -> None:
+    def test_send_test_shot_includes_club_data(self, mock_reader: MockGC2Reader) -> None:
         """send_test_shot should include club data."""
         mock_reader.connect()
 
@@ -531,9 +519,7 @@ class TestNotifyShot:
         assert calls[0][1] == test_shot
         assert calls[1][1] == test_shot
 
-    def test_notify_shot_continues_after_callback_error(
-        self, gc2_reader: GC2USBReader
-    ) -> None:
+    def test_notify_shot_continues_after_callback_error(self, gc2_reader: GC2USBReader) -> None:
         """_notify_shot should continue if a callback raises an error."""
         from gc2_connect.models import GC2ShotData
 

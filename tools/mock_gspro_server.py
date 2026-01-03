@@ -38,22 +38,24 @@ def run_server(host: str = "0.0.0.0", port: int = 921):
                                 break
 
                             try:
-                                message = json.loads(data.decode('utf-8'))
+                                message = json.loads(data.decode("utf-8"))
 
                                 # Pretty print the received shot
                                 timestamp = datetime.now().strftime("%H:%M:%S")
-                                shot_num = message.get('ShotNumber', '?')
+                                shot_num = message.get("ShotNumber", "?")
 
                                 print(f"\n[{timestamp}] Shot #{shot_num} received:")
 
-                                ball_data = message.get('BallData', {})
+                                ball_data = message.get("BallData", {})
                                 print(f"  Ball Speed: {ball_data.get('Speed', 0):.1f} mph")
-                                print(f"  Launch: {ball_data.get('VLA', 0):.1f}° / {ball_data.get('HLA', 0):.1f}°")
+                                print(
+                                    f"  Launch: {ball_data.get('VLA', 0):.1f}° / {ball_data.get('HLA', 0):.1f}°"
+                                )
                                 print(f"  Total Spin: {ball_data.get('TotalSpin', 0):.0f} RPM")
                                 print(f"  Spin Axis: {ball_data.get('SpinAxis', 0):.1f}°")
 
-                                club_data = message.get('ClubData', {})
-                                if message.get('ShotDataOptions', {}).get('ContainsClubData'):
+                                club_data = message.get("ClubData", {})
+                                if message.get("ShotDataOptions", {}).get("ContainsClubData"):
                                     print(f"  Club Speed: {club_data.get('Speed', 0):.1f} mph")
                                     print(f"  Path: {club_data.get('Path', 0):.1f}°")
                                     print(f"  Face: {club_data.get('FaceToTarget', 0):.1f}°")
@@ -62,20 +64,14 @@ def run_server(host: str = "0.0.0.0", port: int = 921):
                                 response = {
                                     "Code": 200,
                                     "Message": "Shot received successfully",
-                                    "Player": {
-                                        "Handed": "RH",
-                                        "Club": "DR"
-                                    }
+                                    "Player": {"Handed": "RH", "Club": "DR"},
                                 }
 
                             except json.JSONDecodeError:
                                 print(f"Invalid JSON received: {data}")
-                                response = {
-                                    "Code": 500,
-                                    "Message": "Invalid JSON"
-                                }
+                                response = {"Code": 500, "Message": "Invalid JSON"}
 
-                            conn.sendall(json.dumps(response).encode('utf-8'))
+                            conn.sendall(json.dumps(response).encode("utf-8"))
 
                         except TimeoutError:
                             continue
@@ -89,9 +85,9 @@ def run_server(host: str = "0.0.0.0", port: int = 921):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Mock GSPro Server')
-    parser.add_argument('--host', default='0.0.0.0', help='Host to bind to')
-    parser.add_argument('--port', type=int, default=921, help='Port to listen on')
+    parser = argparse.ArgumentParser(description="Mock GSPro Server")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=921, help="Port to listen on")
     args = parser.parse_args()
 
     run_server(args.host, args.port)
