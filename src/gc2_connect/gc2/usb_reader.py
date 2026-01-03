@@ -417,12 +417,18 @@ class GC2USBReader:
                     # Convert to string
                     text = ''.join(chr(x) for x in data if x != 0)
 
-                    # Log received data for debugging
-                    if 'SHOT_ID' in text or 'SPIN_RPM' in text or 'BACK_RPM' in text or 'SIDE_RPM' in text:
+                    # Log ALL received data for debugging
+                    # Shot-relevant packets at INFO, others at DEBUG
+                    is_shot_data = 'SHOT_ID' in text or 'SPIN_RPM' in text or 'BACK_RPM' in text or 'SIDE_RPM' in text
+                    is_tracking = '0M' in text
+
+                    if is_shot_data:
                         logger.info(f"USB RX [{ep_name}] ({len(data)} bytes): {text!r}")
-                    elif '0M' in text:
-                        # 0M messages are ball tracking/position - log at debug level
+                    elif is_tracking:
                         logger.debug(f"USB RX [{ep_name}] 0M tracking: {text!r}")
+                    else:
+                        # Log ALL other packets so we can see what's being received
+                        logger.info(f"USB RX [{ep_name}] ({len(data)} bytes) OTHER: {text!r}")
 
                     # Always update line buffer to handle values split across packets
                     # But only accumulate fields from 0H (shot data) messages
