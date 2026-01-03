@@ -134,12 +134,12 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Implement mode switching
   - [x] Implement shot routing
 
-- [ ] **Prompt 18**: Open Range Settings
-  - [ ] Write tests for settings migration
-  - [ ] Add OpenRangeSettings to Settings class
-  - [ ] Add ConditionsSettings (temp, elevation, wind)
-  - [ ] Implement v1 -> v2 migration
-  - [ ] Update schema version
+- [x] **Prompt 18**: Open Range Settings
+  - [x] Write tests for settings migration
+  - [x] Add OpenRangeSettings to Settings class
+  - [x] Add ConditionsSettings (temp, elevation, wind)
+  - [x] Implement v1 -> v2 migration
+  - [x] Update schema version
 
 ### Visualization & UI
 
