@@ -103,13 +103,13 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Implement lift coefficient (quadratic formula)
   - [x] Implement air density calculation
 
-- [ ] **Prompt 14**: Trajectory Simulation (RK4)
-  - [ ] Write tests for flight physics
-  - [ ] Create open_range/physics/trajectory.py
-  - [ ] Implement RK4 integration
-  - [ ] Implement force calculations (gravity, drag, Magnus)
-  - [ ] Implement wind model
-  - [ ] Validate against Nathan model data
+- [x] **Prompt 14**: Trajectory Simulation (RK4)
+  - [x] Write tests for flight physics
+  - [x] Create open_range/physics/trajectory.py
+  - [x] Implement RK4 integration
+  - [x] Implement force calculations (gravity, drag, Magnus)
+  - [x] Implement wind model
+  - [x] Validate against Nathan model data
 
 - [ ] **Prompt 15**: Ground Physics (Bounce/Roll)
   - [ ] Write tests for bounce and roll
