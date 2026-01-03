@@ -52,11 +52,15 @@ class GC2ShotData:
 
     def is_valid(self) -> bool:
         """Check if shot data appears valid (not a misread)."""
-        # Reject zero spin shots as misreads
-        if self.total_spin == 0:
+        # Reject zero spin shots as misreads (per gc2_to_TGC logic)
+        # Note: check back_spin AND side_spin, not total_spin
+        if self.back_spin == 0.0 and self.side_spin == 0.0:
             return False
-        # Reject unrealistic ball speeds
-        if self.ball_speed < 10 or self.ball_speed > 250:
+        # Reject 2222 backspin as known error code
+        if self.back_spin == 2222.0:
+            return False
+        # Reject clearly invalid speeds (0 or negative, or impossibly high)
+        if self.ball_speed <= 0 or self.ball_speed > 250:
             return False
         return True
 

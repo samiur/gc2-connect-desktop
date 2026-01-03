@@ -173,24 +173,44 @@ class TestGC2ShotDataValidation:
         shot = GC2ShotData.from_gc2_dict(zero_spin_gc2_dict)
         assert shot.is_valid() is False
 
-    def test_low_ball_speed_is_invalid(self) -> None:
-        """Ball speed below 10 mph should be invalid."""
-        shot = GC2ShotData(ball_speed=5.0, total_spin=2000)
+    def test_low_ball_speed_chip_shot_is_valid(self) -> None:
+        """Low ball speed chip shots should be valid if spin data is present."""
+        shot = GC2ShotData(ball_speed=5.0, total_spin=2000, back_spin=1900, side_spin=100)
+        assert shot.is_valid() is True
+
+    def test_zero_ball_speed_is_invalid(self) -> None:
+        """Zero ball speed should be invalid."""
+        shot = GC2ShotData(ball_speed=0.0, total_spin=2000, back_spin=1900, side_spin=100)
         assert shot.is_valid() is False
 
     def test_minimum_valid_ball_speed(self) -> None:
-        """Ball speed at 10 mph should be valid."""
-        shot = GC2ShotData(ball_speed=10.0, total_spin=2000)
+        """Very low ball speed should be valid with spin data."""
+        shot = GC2ShotData(ball_speed=1.0, total_spin=2000, back_spin=1900, side_spin=100)
         assert shot.is_valid() is True
 
     def test_high_ball_speed_is_invalid(self) -> None:
         """Ball speed above 250 mph should be invalid."""
-        shot = GC2ShotData(ball_speed=260.0, total_spin=2000)
+        shot = GC2ShotData(ball_speed=260.0, total_spin=2000, back_spin=1900, side_spin=100)
         assert shot.is_valid() is False
 
     def test_maximum_valid_ball_speed(self) -> None:
         """Ball speed at 250 mph should be valid."""
-        shot = GC2ShotData(ball_speed=250.0, total_spin=2000)
+        shot = GC2ShotData(ball_speed=250.0, total_spin=2000, back_spin=1900, side_spin=100)
+        assert shot.is_valid() is True
+
+    def test_2222_backspin_is_invalid(self) -> None:
+        """2222 backspin is a known GC2 error code and should be rejected."""
+        shot = GC2ShotData(ball_speed=150.0, total_spin=2222, back_spin=2222.0, side_spin=0)
+        assert shot.is_valid() is False
+
+    def test_zero_back_and_side_spin_is_invalid(self) -> None:
+        """Zero back spin AND side spin indicates a misread."""
+        shot = GC2ShotData(ball_speed=150.0, total_spin=0, back_spin=0.0, side_spin=0.0)
+        assert shot.is_valid() is False
+
+    def test_zero_back_spin_with_side_spin_is_valid(self) -> None:
+        """Zero back spin but non-zero side spin should be valid."""
+        shot = GC2ShotData(ball_speed=150.0, total_spin=500, back_spin=0.0, side_spin=500.0)
         assert shot.is_valid() is True
 
     def test_typical_driver_shot_is_valid(self) -> None:

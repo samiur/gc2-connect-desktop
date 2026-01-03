@@ -172,10 +172,11 @@ class TestParseDataValidation:
         shot = gc2_reader.parse_data(INVALID_ZERO_SPIN)
         assert shot is None
 
-    def test_parse_rejects_low_ball_speed(self, gc2_reader: GC2USBReader) -> None:
-        """Ball speed below 10 mph should be rejected."""
+    def test_parse_accepts_low_ball_speed_chip_shot(self, gc2_reader: GC2USBReader) -> None:
+        """Low ball speed chip shots with spin data should be accepted."""
         shot = gc2_reader.parse_data(INVALID_LOW_SPEED)
-        assert shot is None
+        assert shot is not None
+        assert shot.ball_speed == 5.0
 
     def test_parse_rejects_high_ball_speed(self, gc2_reader: GC2USBReader) -> None:
         """Ball speed above 250 mph should be rejected."""
@@ -289,21 +290,36 @@ SIDE_RPM=-100
 class TestParseDataPartial:
     """Tests for partial data parsing."""
 
-    def test_parse_missing_required_fields_still_parses(
+    def test_parse_missing_spin_components_is_rejected(
         self, gc2_reader: GC2USBReader
     ) -> None:
-        """Missing fields should use defaults, validation determines validity."""
+        """Missing spin components default to 0, which is rejected as misread."""
         data = """
 SHOT_ID=1
 SPEED_MPH=145.2
 SPIN_RPM=2500
 """
         shot = gc2_reader.parse_data(data)
-        # back_spin and side_spin default to 0, but total_spin is set
+        # back_spin and side_spin default to 0, which is now rejected as misread
+        assert shot is None
+
+    def test_parse_with_spin_components_parses(
+        self, gc2_reader: GC2USBReader
+    ) -> None:
+        """Shot with spin components should parse successfully."""
+        data = """
+SHOT_ID=1
+SPEED_MPH=145.2
+SPIN_RPM=2500
+BACK_RPM=2400
+SIDE_RPM=100
+"""
+        shot = gc2_reader.parse_data(data)
         assert shot is not None
         assert shot.ball_speed == 145.2
         assert shot.total_spin == 2500.0
-        assert shot.back_spin == 0.0  # Default
+        assert shot.back_spin == 2400.0
+        assert shot.side_spin == 100.0
 
     def test_parse_only_club_data_invalid(self, gc2_reader: GC2USBReader) -> None:
         """Club data only (no ball data) should be invalid."""
