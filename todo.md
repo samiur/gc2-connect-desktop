@@ -89,11 +89,11 @@ Target Release: v1.1.0 (with Open Range)
 
 ### Physics Engine
 
-- [ ] **Prompt 12**: Open Range Data Models & Constants
-  - [ ] Write tests for Vec3, TrajectoryPoint, etc.
-  - [ ] Create open_range/models.py
-  - [ ] Create open_range/physics/constants.py
-  - [ ] Match docs/PHYSICS.md specifications
+- [x] **Prompt 12**: Open Range Data Models & Constants
+  - [x] Write tests for Vec3, TrajectoryPoint, etc.
+  - [x] Create open_range/models.py
+  - [x] Create open_range/physics/constants.py
+  - [x] Match docs/PHYSICS.md specifications
 
 - [ ] **Prompt 13**: Aerodynamics Module
   - [ ] Write tests for Cd, Cl, air density
