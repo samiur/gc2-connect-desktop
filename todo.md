@@ -78,10 +78,10 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Add session statistics
   - [x] Improve UI performance
 
-- [ ] **Prompt 11**: CSV Export
-  - [ ] Implement export function
-  - [ ] Add UI export button
-  - [ ] Test file output
+- [x] **Prompt 11**: CSV Export
+  - [x] Implement export function
+  - [x] Add UI export button
+  - [x] Test file output
 
 ---
 

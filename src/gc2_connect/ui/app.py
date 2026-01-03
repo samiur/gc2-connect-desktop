@@ -18,6 +18,7 @@ from gc2_connect.config.settings import Settings, get_settings_path
 from gc2_connect.gc2.usb_reader import GC2USBReader, MockGC2Reader
 from gc2_connect.gspro.client import GSProClient
 from gc2_connect.models import GC2BallStatus, GC2ShotData
+from gc2_connect.services.export import export_to_csv, generate_export_filename
 from gc2_connect.services.history import ShotHistoryManager
 from gc2_connect.utils.reconnect import ReconnectionManager, ReconnectionState
 
@@ -457,7 +458,11 @@ class GC2ConnectApp:
                 self.history_count_label = ui.label(
                     self.shot_history.format_count_display()
                 ).classes("text-sm text-gray-400")
-                ui.button("Clear", on_click=self._clear_history).props("flat size=sm")
+                with ui.row().classes("gap-1"):
+                    ui.button("Export CSV", on_click=self._export_csv, icon="download").props(
+                        "flat size=sm"
+                    )
+                    ui.button("Clear", on_click=self._clear_history).props("flat size=sm")
 
             ui.separator()
 
@@ -554,6 +559,37 @@ class GC2ConnectApp:
         """Clear the shot history."""
         self.shot_history.clear()
         self._refresh_history()
+
+    async def _export_csv(self) -> None:
+        """Export shot history to CSV file.
+
+        Opens a file download dialog for the user to save the CSV file.
+        The default filename includes a timestamp.
+        """
+        if self.shot_history.count == 0:
+            ui.notify("No shots to export", type="warning")
+            return
+
+        try:
+            # Generate filename with timestamp
+            filename = generate_export_filename()
+
+            # Get platform-appropriate downloads directory
+            downloads_dir = Path.home() / "Downloads"
+            if not downloads_dir.exists():
+                downloads_dir = Path.home()
+
+            filepath = downloads_dir / filename
+
+            # Export the shots
+            export_to_csv(self.shot_history.shots, filepath)
+
+            ui.notify(f"Exported {self.shot_history.count} shots to {filename}", type="positive")
+            logger.info(f"Shot history exported to {filepath}")
+
+        except OSError as e:
+            ui.notify(f"Failed to export: {e}", type="negative")
+            logger.error(f"Failed to export shot history: {e}")
 
     async def _connect_gc2(self) -> None:
         """Connect to the GC2."""
