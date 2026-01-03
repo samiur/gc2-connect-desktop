@@ -366,9 +366,7 @@ class PhysicsEngine:
         Returns:
             ShotResult with ball at origin, stopped.
         """
-        trajectory = [
-            TrajectoryPoint(t=0.0, x=0.0, y=0.0, z=0.0, phase=Phase.STOPPED)
-        ]
+        trajectory = [TrajectoryPoint(t=0.0, x=0.0, y=0.0, z=0.0, phase=Phase.STOPPED)]
         summary = ShotSummary(
             carry_distance=0.0,
             total_distance=0.0,
