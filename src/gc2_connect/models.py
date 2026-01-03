@@ -5,8 +5,10 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 
 @dataclass
@@ -17,23 +19,23 @@ class GC2ShotData:
     timestamp: datetime = field(default_factory=datetime.now)
 
     # Ball data
-    ball_speed: float = 0.0          # mph
-    launch_angle: float = 0.0        # degrees (vertical)
+    ball_speed: float = 0.0  # mph
+    launch_angle: float = 0.0  # degrees (vertical)
     horizontal_launch_angle: float = 0.0  # degrees
-    total_spin: float = 0.0          # RPM
-    back_spin: float = 0.0           # RPM
-    side_spin: float = 0.0           # RPM
+    total_spin: float = 0.0  # RPM
+    back_spin: float = 0.0  # RPM
+    side_spin: float = 0.0  # RPM
 
     # Club data (HMT)
-    club_speed: float | None = None       # mph
-    swing_path: float | None = None       # degrees
+    club_speed: float | None = None  # mph
+    swing_path: float | None = None  # degrees
     angle_of_attack: float | None = None  # degrees
-    face_to_target: float | None = None   # degrees
-    lie: float | None = None              # degrees
-    dynamic_loft: float | None = None     # degrees
+    face_to_target: float | None = None  # degrees
+    lie: float | None = None  # degrees
+    dynamic_loft: float | None = None  # degrees
     horizontal_impact: float | None = None  # mm
-    vertical_impact: float | None = None    # mm
-    closure_rate: float | None = None     # deg/sec
+    vertical_impact: float | None = None  # mm
+    closure_rate: float | None = None  # deg/sec
 
     # Flags
     has_hmt: bool = False
@@ -70,24 +72,24 @@ class GC2ShotData:
         shot = cls()
 
         # Field mapping from GC2 protocol
-        field_map = {
-            'SHOT_ID': ('shot_id', int),
-            'SPEED_MPH': ('ball_speed', float),
-            'ELEVATION_DEG': ('launch_angle', float),
-            'AZIMUTH_DEG': ('horizontal_launch_angle', float),
-            'SPIN_RPM': ('total_spin', float),
-            'BACK_RPM': ('back_spin', float),
-            'SIDE_RPM': ('side_spin', float),
-            'CLUBSPEED_MPH': ('club_speed', float),
-            'HPATH_DEG': ('swing_path', float),
-            'VPATH_DEG': ('angle_of_attack', float),
-            'FACE_T_DEG': ('face_to_target', float),
-            'LIE_DEG': ('lie', float),
-            'LOFT_DEG': ('dynamic_loft', float),
-            'HIMPACT_MM': ('horizontal_impact', float),
-            'VIMPACT_MM': ('vertical_impact', float),
-            'CLOSING_RATE_DEGSEC': ('closure_rate', float),
-            'HMT': ('has_hmt', lambda x: x.lower() in ('1', 'true', 'yes')),
+        field_map: dict[str, tuple[str, Callable[[str], Any]]] = {
+            "SHOT_ID": ("shot_id", int),
+            "SPEED_MPH": ("ball_speed", float),
+            "ELEVATION_DEG": ("launch_angle", float),
+            "AZIMUTH_DEG": ("horizontal_launch_angle", float),
+            "SPIN_RPM": ("total_spin", float),
+            "BACK_RPM": ("back_spin", float),
+            "SIDE_RPM": ("side_spin", float),
+            "CLUBSPEED_MPH": ("club_speed", float),
+            "HPATH_DEG": ("swing_path", float),
+            "VPATH_DEG": ("angle_of_attack", float),
+            "FACE_T_DEG": ("face_to_target", float),
+            "LIE_DEG": ("lie", float),
+            "LOFT_DEG": ("dynamic_loft", float),
+            "HIMPACT_MM": ("horizontal_impact", float),
+            "VIMPACT_MM": ("vertical_impact", float),
+            "CLOSING_RATE_DEGSEC": ("closure_rate", float),
+            "HMT": ("has_hmt", lambda x: x.lower() in ("1", "true", "yes")),
         }
 
         for gc2_key, (attr, converter) in field_map.items():
@@ -133,23 +135,23 @@ class GC2BallStatus:
         status = cls()
 
         # Parse FLAGS
-        if 'FLAGS' in data:
+        if "FLAGS" in data:
             try:
-                status.flags = int(data['FLAGS'])
+                status.flags = int(data["FLAGS"])
             except ValueError:
                 pass
 
         # Parse BALLS count
-        if 'BALLS' in data:
+        if "BALLS" in data:
             try:
-                status.ball_count = int(data['BALLS'])
+                status.ball_count = int(data["BALLS"])
             except ValueError:
                 pass
 
         # Parse BALL1 position (format: "x,y,z")
-        if 'BALL1' in data:
+        if "BALL1" in data:
             try:
-                parts = data['BALL1'].split(',')
+                parts = data["BALL1"].split(",")
                 if len(parts) == 3:
                     status.ball_position = (
                         int(parts[0]),
@@ -165,6 +167,7 @@ class GC2BallStatus:
 @dataclass
 class GSProBallData:
     """Ball data for GSPro API."""
+
     Speed: float = 0.0
     SpinAxis: float = 0.0
     TotalSpin: float = 0.0
@@ -178,6 +181,7 @@ class GSProBallData:
 @dataclass
 class GSProClubData:
     """Club data for GSPro API."""
+
     Speed: float = 0.0
     AngleOfAttack: float = 0.0
     FaceToTarget: float = 0.0
@@ -193,6 +197,7 @@ class GSProClubData:
 @dataclass
 class GSProShotOptions:
     """Shot options for GSPro API."""
+
     ContainsBallData: bool = True
     ContainsClubData: bool = False
     LaunchMonitorIsReady: bool = True
@@ -203,6 +208,7 @@ class GSProShotOptions:
 @dataclass
 class GSProShotMessage:
     """Complete shot message for GSPro API."""
+
     DeviceID: str = "GC2 Connect"
     Units: str = "Yards"
     ShotNumber: int = 1
@@ -258,7 +264,7 @@ class GSProShotMessage:
             ShotDataOptions=options,
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "DeviceID": self.DeviceID,
@@ -300,16 +306,17 @@ class GSProShotMessage:
 @dataclass
 class GSProResponse:
     """Response from GSPro API."""
+
     Code: int = 0
     Message: str = ""
-    Player: dict | None = None
+    Player: dict[str, Any] | None = None
 
     @property
     def is_success(self) -> bool:
         return 200 <= self.Code < 300
 
     @classmethod
-    def from_dict(cls, data: dict) -> GSProResponse:
+    def from_dict(cls, data: dict[str, Any]) -> GSProResponse:
         return cls(
             Code=data.get("Code", 0),
             Message=data.get("Message", ""),

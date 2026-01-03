@@ -9,8 +9,15 @@ import json
 import logging
 import socket
 from collections.abc import Callable
+from typing import Any
 
-from gc2_connect.models import GC2BallStatus, GC2ShotData, GSProResponse, GSProShotMessage
+from gc2_connect.models import (
+    GC2BallStatus,
+    GC2ShotData,
+    GSProResponse,
+    GSProShotMessage,
+    GSProShotOptions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +34,7 @@ class GSProClient:
         self._socket: socket.socket | None = None
         self._connected = False
         self._shot_number = 0
-        self._current_player: dict | None = None
+        self._current_player: dict[str, Any] | None = None
         self._response_callbacks: list[Callable[[GSProResponse], None]] = []
 
     @property
@@ -39,18 +46,18 @@ class GSProClient:
         return self._shot_number
 
     @property
-    def current_player(self) -> dict | None:
+    def current_player(self) -> dict[str, Any] | None:
         return self._current_player
 
-    def add_response_callback(self, callback: Callable[[GSProResponse], None]):
+    def add_response_callback(self, callback: Callable[[GSProResponse], None]) -> None:
         """Add a callback for GSPro responses."""
         self._response_callbacks.append(callback)
 
-    def remove_response_callback(self, callback: Callable[[GSProResponse], None]):
+    def remove_response_callback(self, callback: Callable[[GSProResponse], None]) -> None:
         if callback in self._response_callbacks:
             self._response_callbacks.remove(callback)
 
-    def _notify_response(self, response: GSProResponse):
+    def _notify_response(self, response: GSProResponse) -> None:
         """Notify all callbacks of a response."""
         for callback in self._response_callbacks:
             try:
@@ -62,10 +69,7 @@ class GSProClient:
         """Connect to GSPro."""
         try:
             # Use create_connection for cleaner connection handling
-            self._socket = socket.create_connection(
-                (self.host, self.port),
-                timeout=5.0
-            )
+            self._socket = socket.create_connection((self.host, self.port), timeout=5.0)
             # Set TCP_NODELAY to disable Nagle's algorithm for immediate sends
             self._socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self._socket.settimeout(5.0)
@@ -85,7 +89,7 @@ class GSProClient:
             self._connected = False
             return False
 
-    def disconnect(self):
+    def disconnect(self) -> None:
         """Disconnect from GSPro."""
         if self._socket:
             try:
@@ -163,9 +167,7 @@ class GSProClient:
 
     async def send_status_async(self, status: GC2BallStatus) -> GSProResponse | None:
         """Async version of send_status."""
-        return await asyncio.get_event_loop().run_in_executor(
-            None, self.send_status, status
-        )
+        return await asyncio.get_event_loop().run_in_executor(None, self.send_status, status)
 
     def _send_message(
         self, message: GSProShotMessage, expect_response: bool = True
@@ -176,12 +178,18 @@ class GSProClient:
             message: The message to send
             expect_response: If True, wait for and parse response. If False, just send.
         """
+        if self._socket is None:
+            logger.error("Cannot send message: socket is None")
+            return None
+
+        sock = self._socket  # Local reference for type narrowing
+
         try:
             # Clear any buffered data before sending (stale responses)
-            self._socket.setblocking(False)
+            sock.setblocking(False)
             try:
                 while True:
-                    stale = self._socket.recv(4096)
+                    stale = sock.recv(4096)
                     if stale:
                         logger.debug(f"Cleared {len(stale)} bytes of stale buffer data")
                     else:
@@ -189,27 +197,27 @@ class GSProClient:
             except BlockingIOError:
                 pass  # No data to clear, good
             finally:
-                self._socket.setblocking(True)
+                sock.setblocking(True)
 
             # Send JSON message
             json_data = json.dumps(message.to_dict())
-            encoded = json_data.encode('utf-8')
-            self._socket.sendall(encoded)
+            encoded = json_data.encode("utf-8")
+            sock.sendall(encoded)
             logger.debug(f"Sent {len(encoded)} bytes: {json_data}")
 
             if not expect_response:
                 return None
 
             # Receive response
-            self._socket.settimeout(5.0)
+            sock.settimeout(5.0)
             logger.debug("Waiting for response...")
-            response_data = self._socket.recv(4096)
+            response_data = sock.recv(4096)
 
             if not response_data:
                 logger.warning("Empty response from GSPro")
                 return None
 
-            response_str = response_data.decode('utf-8')
+            response_str = response_data.decode("utf-8")
 
             # Parse only the first JSON object (handle concatenated responses)
             decoder = json.JSONDecoder()
@@ -240,20 +248,3 @@ class GSProClient:
     async def send_shot_async(self, shot: GC2ShotData) -> GSProResponse | None:
         """Async version of send_shot."""
         return await asyncio.get_event_loop().run_in_executor(None, self.send_shot, shot)
-
-
-class GSProShotOptions:
-    """Helper class for shot options."""
-    def __init__(
-        self,
-        ContainsBallData: bool = True,
-        ContainsClubData: bool = False,
-        LaunchMonitorIsReady: bool = True,
-        LaunchMonitorBallDetected: bool = True,
-        IsHeartBeat: bool = False,
-    ):
-        self.ContainsBallData = ContainsBallData
-        self.ContainsClubData = ContainsClubData
-        self.LaunchMonitorIsReady = LaunchMonitorIsReady
-        self.LaunchMonitorBallDetected = LaunchMonitorBallDetected
-        self.IsHeartBeat = IsHeartBeat
