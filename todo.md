@@ -1,12 +1,13 @@
 # GC2 Connect Desktop - Implementation TODO
 
-## Current Status: Planning Complete
+## Current Status: Open Range Feature Development
 
 Started: 2025-12-30
+Target Release: v1.1.0 (with Open Range)
 
 ---
 
-## Phase 1: Foundation & Testing Infrastructure
+## Phase 1: Foundation & Testing Infrastructure ✅
 
 - [x] **Prompt 1**: Project Setup & Testing Infrastructure
   - [x] Update pyproject.toml with dev dependencies
@@ -39,7 +40,7 @@ Started: 2025-12-30
 
 ---
 
-## Phase 2: Configuration & Settings
+## Phase 2: Configuration & Settings ✅
 
 - [x] **Prompt 6**: Settings Module Implementation
   - [x] Write tests first (TDD)
@@ -57,6 +58,7 @@ Started: 2025-12-30
 ## Phase 3: Reliability & Error Handling
 
 - [ ] **Prompt 8**: Auto-Reconnection Logic
+  - [ ] Write tests for reconnection
   - [ ] Create ReconnectionManager
   - [ ] Integrate with GC2 reader
   - [ ] Integrate with GSPro client
@@ -64,10 +66,10 @@ Started: 2025-12-30
 
 ---
 
-## Phase 4: Integration & Features
+## Phase 4: GSPro Features
 
 - [ ] **Prompt 9**: Integration Tests
-  - [ ] Test full shot flow
+  - [ ] Test full shot flow (MockGC2 -> App -> MockGSPro)
   - [ ] Test connection handling
   - [ ] Create test fixtures
 
@@ -83,28 +85,110 @@ Started: 2025-12-30
 
 ---
 
-## Phase 5: Testing & Polish
+## Phase 5: Open Range Feature (NEW)
 
-- [ ] **Prompt 12**: End-to-End Tests
+### Physics Engine
+
+- [ ] **Prompt 12**: Open Range Data Models & Constants
+  - [ ] Write tests for Vec3, TrajectoryPoint, etc.
+  - [ ] Create open_range/models.py
+  - [ ] Create open_range/physics/constants.py
+  - [ ] Match docs/PHYSICS.md specifications
+
+- [ ] **Prompt 13**: Aerodynamics Module
+  - [ ] Write tests for Cd, Cl, air density
+  - [ ] Create open_range/physics/aerodynamics.py
+  - [ ] Implement Reynolds number calculation
+  - [ ] Implement drag coefficient (piecewise linear)
+  - [ ] Implement lift coefficient (quadratic formula)
+  - [ ] Implement air density calculation
+
+- [ ] **Prompt 14**: Trajectory Simulation (RK4)
+  - [ ] Write tests for flight physics
+  - [ ] Create open_range/physics/trajectory.py
+  - [ ] Implement RK4 integration
+  - [ ] Implement force calculations (gravity, drag, Magnus)
+  - [ ] Implement wind model
+  - [ ] Validate against Nathan model data
+
+- [ ] **Prompt 15**: Ground Physics (Bounce/Roll)
+  - [ ] Write tests for bounce and roll
+  - [ ] Create open_range/physics/ground.py
+  - [ ] Implement bounce physics (COR, friction)
+  - [ ] Implement roll physics (deceleration)
+  - [ ] Test surface types (Fairway, Rough, Green)
+
+- [ ] **Prompt 16**: Physics Engine Integration
+  - [ ] Write validation tests (driver, 7-iron, wedge)
+  - [ ] Create open_range/physics/engine.py (PhysicsEngine)
+  - [ ] Create open_range/engine.py (OpenRangeEngine)
+  - [ ] Performance test < 100ms per shot
+  - [ ] Validate carry distances within 5% tolerance
+
+### Mode Selection & Settings
+
+- [ ] **Prompt 17**: Mode Selection & Shot Router
+  - [ ] Write tests for shot router
+  - [ ] Create services/shot_router.py
+  - [ ] Implement AppMode enum
+  - [ ] Implement mode switching
+  - [ ] Implement shot routing
+
+- [ ] **Prompt 18**: Open Range Settings
+  - [ ] Write tests for settings migration
+  - [ ] Add OpenRangeSettings to Settings class
+  - [ ] Add ConditionsSettings (temp, elevation, wind)
+  - [ ] Implement v1 -> v2 migration
+  - [ ] Update schema version
+
+### Visualization & UI
+
+- [ ] **Prompt 19**: 3D Driving Range Visualization
+  - [ ] Write tests for visualization
+  - [ ] Create open_range/visualization/range_scene.py
+  - [ ] Create ground plane and distance markers
+  - [ ] Create target greens
+  - [ ] Create open_range/visualization/ball_animation.py
+  - [ ] Implement ball flight animation
+
+- [ ] **Prompt 20**: Open Range UI Panel
+  - [ ] Write integration tests
+  - [ ] Create ui/components/mode_selector.py
+  - [ ] Create ui/components/open_range_view.py
+  - [ ] Implement phase indicators
+  - [ ] Implement shot data display
+
+- [ ] **Prompt 21**: Open Range Integration
+  - [ ] Write integration flow tests
+  - [ ] Update ui/app.py with mode selector
+  - [ ] Wire shot router to GC2 reader
+  - [ ] Wire shot router to GSPro and Open Range
+  - [ ] Handle mode-specific UI visibility
+  - [ ] Performance validation
+
+---
+
+## Phase 6: Polish & Release
+
+- [ ] **Prompt 22**: End-to-End Tests
   - [ ] Setup e2e infrastructure
-  - [ ] Test user flows
+  - [ ] Test GSPro user flows
+  - [ ] Test Open Range user flows
   - [ ] Test error handling
 
-- [ ] **Prompt 13**: Type Checking & Linting
+- [ ] **Prompt 23**: Type Checking & Linting
   - [ ] Fix all mypy errors
   - [ ] Fix all ruff issues
   - [ ] Add pre-commit hooks
 
-- [ ] **Prompt 14**: Documentation
-  - [ ] Update README
+- [ ] **Prompt 24**: Documentation & Release
+  - [ ] Update README for Open Range
   - [ ] Create CONTRIBUTING.md
+  - [ ] Create CHANGELOG.md
   - [ ] USB setup guides
-
-- [ ] **Prompt 15**: Final Testing & Packaging
+  - [ ] Version bump to 1.1.0
   - [ ] Full test suite with coverage
-  - [ ] Manual testing
-  - [ ] Build packages
-  - [ ] Create release
+  - [ ] Build package
 
 ---
 
@@ -151,3 +235,12 @@ uv run python tools/mock_gspro_server.py
 - **GSPro Buffer Management (2026-01-03)**: Use `json.JSONDecoder.raw_decode()` to parse only first JSON object (handles concatenated responses from buffered messages).
 - **Ball Speed Units (2026-01-03)**: GSPro expects ball speed in mph (not m/s). The debug window may show wrong values but actual game uses mph correctly.
 - **Shutdown Handling (2026-01-03)**: Added proper shutdown handlers to disconnect GSPro and GC2 cleanly. Uses NiceGUI `app.on_shutdown()`, signal handlers (SIGINT, SIGTERM), and atexit fallback.
+- **Open Range Physics (2026-01-03)**: Using Nathan model + WSU aerodynamics. Cd uses piecewise linear with spin term. Cl uses quadratic formula (not table lookup). Validated against libgolf reference implementation.
+- **Open Range Visualization (2026-01-03)**: Using NiceGUI's Three.js integration (ui.scene). Ball animation follows trajectory points with phase indicators.
+
+### Architecture Decisions
+
+- **Physics Engine Location**: `src/gc2_connect/open_range/physics/` - Separate from UI for testability
+- **Mode Switching**: ShotRouter handles routing, UI handles visibility
+- **Settings Migration**: Automatic v1 -> v2 migration on load
+- **Coordinate System**: X=forward (yards), Y=height (feet), Z=lateral (yards)

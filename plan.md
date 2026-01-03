@@ -1,14 +1,17 @@
 # GC2 Connect Desktop - Implementation Plan
 
 > **Related Documentation:**
-> - `docs/PRD.md` - Product requirements
-> - `docs/TRD.md` - Technical requirements
+> - `docs/PRD.md` - Product requirements (v1.0)
+> - `docs/TRD.md` - Technical requirements (v1.0)
+> - `docs/PRD_OPEN_RANGE.md` - Open Range feature requirements
+> - `docs/TRD_OPEN_RANGE.md` - Open Range technical requirements
+> - `docs/PHYSICS.md` - Golf ball physics specification
 > - `docs/GC2_PROTOCOL.md` - USB protocol specification
 > - `todo.md` - Implementation tracking
 
 ## Project Summary
 
-GC2 Connect Desktop is a Python application that reads shot data from a Foresight GC2 golf launch monitor via USB and sends it to GSPro golf simulation software over the network. The target platforms are macOS and Linux.
+GC2 Connect Desktop is a Python application that reads shot data from a Foresight GC2 golf launch monitor via USB and sends it to GSPro golf simulation software over the network. Version 1.1 adds Open Range - a built-in driving range simulator with physics-accurate ball flight visualization.
 
 ## Current State Analysis
 
@@ -19,39 +22,43 @@ The project has an initial implementation with the following components:
 - **gc2/usb_reader.py**: USB reader with GC2USBReader and MockGC2Reader classes
 - **gspro/client.py**: GSPro TCP client for Open Connect API v1
 - **ui/app.py**: NiceGUI interface with connection panels, shot display, shot history
+- **config/settings.py**: Settings persistence with platform-specific paths
 - **tools/mock_gspro_server.py**: Mock GSPro server for testing
+- **Testing infrastructure**: pytest, mypy, ruff configured
+- **Unit tests**: Models, GC2 protocol, GSPro client
 
 ### Missing/Incomplete
-- **Tests**: No unit, integration, or e2e tests exist
-- **Configuration persistence**: Settings not saved between sessions
-- **Type checking**: mypy not configured
-- **ABOUTME comments**: Files missing required header comments
 - **Auto-reconnection**: Not fully implemented
-- **Settings module**: config/ folder is empty
-- **Linting**: ruff/mypy dependencies incomplete
+- **Integration tests**: Not complete
+- **Shot history improvements**: Basic implementation only
+- **CSV export**: Not implemented
+- **Open Range**: New feature - not started
 
 ## Implementation Phases
 
-### Phase 1: Foundation & Testing Infrastructure
+### Phase 1: Foundation & Testing Infrastructure ✅
 Set up proper testing, linting, and type checking. Add tests for existing code.
 
-### Phase 2: Configuration & Settings
+### Phase 2: Configuration & Settings ✅
 Implement settings persistence so users don't need to reconfigure each session.
 
 ### Phase 3: Reliability & Error Handling
 Add auto-reconnection logic and improve error handling.
 
-### Phase 4: P1 Features
-Implement "should have" features from PRD (shot history improvements, mock mode UI).
+### Phase 4: GSPro Features
+Integration tests, shot history improvements, CSV export.
 
-### Phase 5: Polish & Packaging
+### Phase 5: Open Range Feature (NEW)
+Implement built-in driving range with physics simulation and 3D visualization.
+
+### Phase 6: Polish & Packaging
 Final testing, documentation, and packaging for distribution.
 
 ---
 
 # Prompts
 
-## Prompt 1: Project Setup & Testing Infrastructure
+## Prompt 1: Project Setup & Testing Infrastructure ✅
 
 ```text
 We are building a Python desktop app called GC2 Connect that reads data from a GC2 golf launch monitor via USB and sends it to GSPro. The project already has initial implementation files. Your task is to set up proper testing infrastructure.
@@ -101,7 +108,7 @@ REQUIREMENTS:
 
 ---
 
-## Prompt 2: Add ABOUTME Comments to Existing Files
+## Prompt 2: Add ABOUTME Comments to Existing Files ✅
 
 ```text
 The codebase requires all Python files to start with a 2-line ABOUTME comment explaining what the file does. Each line should start with "ABOUTME: ".
@@ -135,7 +142,7 @@ REQUIREMENTS:
 
 ---
 
-## Prompt 3: Unit Tests for Data Models
+## Prompt 3: Unit Tests for Data Models ✅
 
 ```text
 Write comprehensive unit tests for the data models in src/gc2_connect/models.py.
@@ -178,7 +185,7 @@ REQUIREMENTS:
 
 ---
 
-## Prompt 4: Unit Tests for GC2 Protocol Parsing
+## Prompt 4: Unit Tests for GC2 Protocol Parsing ✅
 
 ```text
 Write unit tests for the GC2 USB reader's protocol parsing functionality.
@@ -259,7 +266,7 @@ REQUIREMENTS:
 
 ---
 
-## Prompt 5: Unit Tests for GSPro Client
+## Prompt 5: Unit Tests for GSPro Client ✅
 
 ```text
 Write unit tests for the GSPro client in src/gc2_connect/gspro/client.py.
@@ -304,7 +311,7 @@ REQUIREMENTS:
 
 ---
 
-## Prompt 6: Settings Module Implementation
+## Prompt 6: Settings Module Implementation ✅
 
 ```text
 Implement the settings persistence module for GC2 Connect.
@@ -368,7 +375,7 @@ REQUIREMENTS:
 
 ---
 
-## Prompt 7: Integrate Settings into UI
+## Prompt 7: Integrate Settings into UI ✅
 
 ```text
 Integrate the Settings module into the NiceGUI application.
@@ -589,7 +596,1128 @@ REQUIREMENTS:
 
 ---
 
-## Prompt 12: End-to-End Tests
+# PHASE 5: OPEN RANGE FEATURE
+
+The Open Range feature adds a built-in driving range simulator with physics-accurate ball flight visualization. This eliminates the need for GSPro for basic practice sessions.
+
+## Prompt 12: Open Range Data Models and Physics Constants
+
+```text
+Create the foundation for the Open Range physics engine by implementing data models and physical constants.
+
+CONTEXT:
+- Open Range simulates golf ball trajectory based on launch monitor data
+- Uses Nathan model + WSU aerodynamics research (see docs/PHYSICS.md)
+- All physics calculations in Python, visualization via NiceGUI Three.js
+
+TASK:
+
+1. First, write tests in tests/unit/test_open_range/test_models.py:
+   - Test Vec3 operations (add, subtract, scale, magnitude, normalize)
+   - Test TrajectoryPoint creation with phase
+   - Test ShotSummary validation
+   - Test LaunchData from GC2ShotData conversion
+   - Test Conditions default values
+
+2. Create src/gc2_connect/open_range/__init__.py
+
+3. Create src/gc2_connect/open_range/models.py with:
+```python
+from pydantic import BaseModel
+from enum import Enum
+
+class Phase(str, Enum):
+    FLIGHT = "flight"
+    BOUNCE = "bounce"
+    ROLLING = "rolling"
+    STOPPED = "stopped"
+
+class Vec3(BaseModel):
+    """3D vector for physics calculations"""
+    x: float
+    y: float
+    z: float
+    # Add helper methods for vector math
+
+class TrajectoryPoint(BaseModel):
+    """Single point in ball trajectory"""
+    t: float           # Time (seconds)
+    x: float           # Forward distance (yards)
+    y: float           # Height (feet)
+    z: float           # Lateral distance (yards)
+    phase: Phase
+
+class ShotSummary(BaseModel):
+    """Shot outcome metrics"""
+    carry_distance: float      # yards
+    total_distance: float      # yards
+    roll_distance: float       # yards
+    offline_distance: float    # yards (+ right, - left)
+    max_height: float          # feet
+    max_height_time: float     # seconds
+    flight_time: float         # seconds
+    total_time: float          # seconds
+    bounce_count: int
+
+class LaunchData(BaseModel):
+    """Input launch conditions"""
+    ball_speed: float          # mph
+    vla: float                 # vertical launch angle (degrees)
+    hla: float                 # horizontal launch angle (degrees)
+    backspin: float            # rpm
+    sidespin: float            # rpm
+
+class Conditions(BaseModel):
+    """Environmental conditions"""
+    temp_f: float = 70.0
+    elevation_ft: float = 0.0
+    humidity_pct: float = 50.0
+    wind_speed_mph: float = 0.0
+    wind_dir_deg: float = 0.0
+
+class ShotResult(BaseModel):
+    """Complete simulation result"""
+    trajectory: list[TrajectoryPoint]
+    summary: ShotSummary
+    launch_data: LaunchData
+    conditions: Conditions
+```
+
+4. Create src/gc2_connect/open_range/physics/__init__.py
+
+5. Create src/gc2_connect/open_range/physics/constants.py with:
+   - Ball properties (mass, diameter, radius, area) per USGA specs
+   - Standard atmosphere constants
+   - Physics constants (gravity, spin decay rate)
+   - Simulation parameters (dt, max_time, max_iterations)
+   - Ground surface properties (Fairway, Rough, Green, Bunker)
+
+Reference docs/PHYSICS.md for exact values.
+
+REQUIREMENTS:
+- All code files must have ABOUTME comments
+- Use Annotated[Type, Field(...)] for Pydantic fields
+- Vec3 should have helper methods: add, sub, scale, mag, normalize, cross, dot
+- Constants should match docs/PHYSICS.md exactly
+- Run tests: uv run pytest tests/unit/test_open_range/test_models.py -v
+```
+
+---
+
+## Prompt 13: Aerodynamics Module
+
+```text
+Implement the aerodynamic coefficient calculations for the golf ball physics engine.
+
+CONTEXT:
+- Drag coefficient (Cd) varies with Reynolds number (drag crisis effect)
+- Lift coefficient (Cl) depends on spin factor S = (ω × r) / V
+- Air density varies with temperature, elevation, and humidity
+- See docs/PHYSICS.md for formulas and libgolf reference
+
+TASK:
+
+1. First, write tests in tests/unit/test_open_range/test_aerodynamics.py:
+   - Test Reynolds number calculation at various speeds
+   - Test Cd lookup: low Re -> ~0.5, high Re -> ~0.21
+   - Test Cd transition in drag crisis region
+   - Test Cd with spin-dependent term
+   - Test Cl at spin factor 0 -> 0.0
+   - Test Cl quadratic formula matches expected values
+   - Test Cl caps at ClMax (0.305) above threshold
+   - Test air density at standard conditions -> ~1.194 kg/m³
+   - Test air density at Denver (5280 ft elevation) -> lower
+   - Test air density at high temperature -> lower
+
+2. Create src/gc2_connect/open_range/physics/aerodynamics.py:
+
+```python
+"""
+ABOUTME: Aerodynamic coefficient calculations for golf ball simulation.
+ABOUTME: Based on WSU research data and libgolf reference implementation.
+"""
+
+def calculate_reynolds(velocity_ms: float, air_density: float) -> float:
+    """Calculate Reynolds number for golf ball at given velocity."""
+    # Re = ρ × V × D / μ
+    pass
+
+def get_drag_coefficient(reynolds: float, spin_factor: float = 0.0) -> float:
+    """
+    Get drag coefficient using piecewise linear model with spin term.
+
+    Args:
+        reynolds: Reynolds number (not in units of 10^5)
+        spin_factor: S = (ω × r) / V
+
+    Returns:
+        Total drag coefficient Cd
+    """
+    # Use constants from docs/PHYSICS.md:
+    # CdLow = 0.500 (Re < 0.5×10^5)
+    # CdHigh = 0.212 (Re > 1.0×10^5)
+    # CdSpin = 0.15 (spin-dependent term)
+    pass
+
+def get_lift_coefficient(spin_factor: float) -> float:
+    """
+    Get lift coefficient using quadratic formula.
+
+    Cl = 1.990×S - 3.250×S²
+    Capped at ClMax = 0.305
+    """
+    pass
+
+def calculate_air_density(
+    temp_f: float,
+    elevation_ft: float,
+    humidity_pct: float,
+    pressure_inhg: float = 29.92
+) -> float:
+    """Calculate air density with atmospheric corrections."""
+    pass
+```
+
+3. Validation test data (from docs/PHYSICS.md):
+   - At 80 mph (35.8 m/s), Re ≈ 1.0×10^5 -> Cd ≈ 0.21-0.50 (transition)
+   - At 160 mph (71.5 m/s), Re ≈ 2.0×10^5 -> Cd ≈ 0.21 (turbulent)
+   - Spin factor 0.30 -> Cl ≈ 0.305 (max)
+   - Standard conditions -> ρ ≈ 1.194 kg/m³
+
+REQUIREMENTS:
+- Match docs/PHYSICS.md formulas exactly
+- Use kinematic viscosity ν = 1.5×10^-5 m²/s for Reynolds calculation
+- Cl formula: Cl = 1.990×S - 3.250×S² (quadratic, not table lookup)
+- Run tests: uv run pytest tests/unit/test_open_range/test_aerodynamics.py -v
+```
+
+---
+
+## Prompt 14: Trajectory Simulation with RK4 Integration
+
+```text
+Implement the core trajectory simulation using 4th-order Runge-Kutta integration.
+
+CONTEXT:
+- Ball trajectory is governed by gravity, drag, and Magnus force
+- RK4 provides accurate integration without fixed small time steps
+- Wind affects relative velocity
+- See docs/PHYSICS.md section 6-7 for force calculations and RK4 algorithm
+
+TASK:
+
+1. First, write tests in tests/unit/test_open_range/test_trajectory.py:
+   - Test initial velocity calculation from launch conditions
+   - Test gravity-only trajectory (no air, should be parabola)
+   - Test drag reduces distance vs gravity-only
+   - Test backspin creates lift (higher apex, more carry)
+   - Test sidespin creates curve (positive = fade/slice right)
+   - Test wind affects trajectory
+   - Test spin decay over time
+   - Test trajectory terminates when ball lands (y <= 0)
+
+2. Create src/gc2_connect/open_range/physics/trajectory.py:
+
+```python
+"""
+ABOUTME: Golf ball trajectory simulation using RK4 integration.
+ABOUTME: Implements Nathan model with drag, lift, and wind effects.
+"""
+
+from dataclasses import dataclass
+from ..models import Vec3, TrajectoryPoint, Phase, Conditions
+from .constants import *
+from .aerodynamics import *
+
+@dataclass
+class SimulationState:
+    """Current state of ball during simulation"""
+    pos: Vec3
+    vel: Vec3
+    spin_back: float
+    spin_side: float
+    t: float
+    phase: Phase
+
+class FlightSimulator:
+    """Simulates ball flight phase (before first ground contact)"""
+
+    def __init__(self, conditions: Conditions, dt: float = 0.01):
+        self.conditions = conditions
+        self.dt = dt
+        self.air_density = calculate_air_density(
+            conditions.temp_f,
+            conditions.elevation_ft,
+            conditions.humidity_pct
+        )
+
+    def get_wind_at_height(self, height_m: float) -> Vec3:
+        """Get wind velocity at height (logarithmic profile)"""
+        pass
+
+    def calculate_acceleration(
+        self,
+        pos: Vec3,
+        vel: Vec3,
+        spin_back: float,
+        spin_side: float
+    ) -> Vec3:
+        """Calculate total acceleration from gravity, drag, and Magnus force"""
+        # 1. Get wind and relative velocity
+        # 2. Calculate drag force (opposes motion)
+        # 3. Calculate Magnus force (perpendicular to spin × velocity)
+        # 4. Sum all forces, divide by mass
+        pass
+
+    def rk4_step(self, state: SimulationState) -> SimulationState:
+        """Perform one RK4 integration step"""
+        # k1 = f(t, y)
+        # k2 = f(t + dt/2, y + dt/2 * k1)
+        # k3 = f(t + dt/2, y + dt/2 * k2)
+        # k4 = f(t + dt, y + dt * k3)
+        # y_new = y + dt/6 * (k1 + 2*k2 + 2*k3 + k4)
+        pass
+
+    def simulate_flight(
+        self,
+        ball_speed_mph: float,
+        vla_deg: float,
+        hla_deg: float,
+        backspin_rpm: float,
+        sidespin_rpm: float
+    ) -> tuple[list[TrajectoryPoint], SimulationState]:
+        """
+        Simulate flight until ball hits ground.
+
+        Returns:
+            (trajectory_points, final_state_at_landing)
+        """
+        pass
+```
+
+3. Unit conversion helpers needed:
+   - mph_to_ms, ms_to_mph
+   - meters_to_yards, meters_to_feet
+   - rpm_to_rad_s
+   - deg_to_rad
+
+4. Validation test data (from docs/PHYSICS.md):
+   - Driver (167 mph, 10.9°, 2686 rpm): expect ~275 yds carry
+   - 7-iron (120 mph, 16.3°, 7097 rpm): expect ~172 yds carry
+   - Allow ±5% tolerance for physics accuracy
+
+REQUIREMENTS:
+- Time step dt = 0.01s (10ms) for accuracy
+- Max simulation time 30s (safety limit)
+- Spin decays at 1% per second
+- Use RK4, not Euler integration
+- Run tests: uv run pytest tests/unit/test_open_range/test_trajectory.py -v
+```
+
+---
+
+## Prompt 15: Ground Physics (Bounce and Roll)
+
+```text
+Implement ground interaction physics for bounce and roll behavior.
+
+CONTEXT:
+- When ball lands, it bounces based on coefficient of restitution (COR)
+- Friction affects tangential velocity on bounce
+- Rolling ball decelerates due to rolling resistance
+- See docs/PHYSICS.md section 8 for ground physics
+
+TASK:
+
+1. First, write tests in tests/unit/test_open_range/test_ground.py:
+   - Test bounce on fairway reduces vertical velocity by COR (0.6)
+   - Test bounce reduces tangential velocity by friction
+   - Test steep impact angle = less forward momentum retained
+   - Test shallow impact angle = more forward momentum retained
+   - Test roll deceleration on fairway
+   - Test roll deceleration on green (lower resistance)
+   - Test roll deceleration on rough (higher resistance)
+   - Test ball stops when speed < 0.1 m/s
+   - Test spin reduces on bounce
+   - Test spin affects roll (backspin = longer roll? shorter?)
+
+2. Create src/gc2_connect/open_range/physics/ground.py:
+
+```python
+"""
+ABOUTME: Ground interaction physics for golf ball bounce and roll.
+ABOUTME: Inspired by libgolf reference implementation.
+"""
+
+from dataclasses import dataclass
+from ..models import Vec3, Phase
+from .constants import SURFACES, GRAVITY_MS2, BALL_RADIUS_M
+
+@dataclass
+class GroundSurface:
+    """Properties of a ground surface"""
+    name: str
+    cor: float              # Coefficient of restitution (0-1)
+    rolling_resistance: float   # Deceleration factor
+    friction: float         # Tangential friction on bounce
+
+class GroundPhysics:
+    """Handles bounce and roll physics"""
+
+    def __init__(self, surface_name: str = "Fairway"):
+        self.surface = SURFACES[surface_name]
+
+    def bounce(self, state: "SimulationState") -> "SimulationState":
+        """
+        Apply bounce physics at ground contact.
+
+        Physics:
+        - Normal velocity: v_n_new = -v_n * COR
+        - Tangential velocity: v_t_new = v_t * (1 - friction * factor)
+        - Spin: reduced by friction interaction
+        """
+        pass
+
+    def roll_step(self, state: "SimulationState", dt: float) -> "SimulationState":
+        """
+        Simulate one step of rolling.
+
+        Physics:
+        - Deceleration = rolling_resistance * g
+        - Speed decreases by decel * dt
+        - Position updates by velocity * dt
+        - Stops when speed < 0.1 m/s
+        """
+        pass
+
+    def should_continue_bouncing(self, state: "SimulationState") -> bool:
+        """Check if ball has enough energy for another bounce"""
+        # If vertical velocity < threshold, transition to rolling
+        pass
+```
+
+3. Surface property reference (from constants):
+   - Fairway: COR=0.6, resistance=0.10, friction=0.50
+   - Green: COR=0.4, resistance=0.05, friction=0.30
+   - Rough: COR=0.3, resistance=0.30, friction=0.70
+
+4. Test realistic behaviors:
+   - Driver landing at ~45° should bounce and roll significantly
+   - Wedge landing at ~60° should have less roll
+   - Ball on green should roll farther than rough
+
+REQUIREMENTS:
+- Bounce should feel realistic (multiple bounces for high-speed impacts)
+- Maximum 5 bounces before forcing roll phase
+- Ball must eventually stop (no infinite rolling)
+- Run tests: uv run pytest tests/unit/test_open_range/test_ground.py -v
+```
+
+---
+
+## Prompt 16: Complete Physics Engine Integration
+
+```text
+Wire together trajectory and ground physics into a complete simulation engine.
+
+CONTEXT:
+- FlightSimulator handles air phase
+- GroundPhysics handles bounces and rolling
+- Need to combine into seamless simulation from launch to rest
+- Must validate against known data from docs/PHYSICS.md
+
+TASK:
+
+1. First, write validation tests in tests/unit/test_open_range/test_physics_validation.py:
+   - Test driver shot (167 mph, 10.9°, 2686 rpm) -> 275 yds ± 5%
+   - Test driver shot (160 mph, 11.0°, 3000 rpm) -> 259 yds ± 3%
+   - Test 7-iron (120 mph, 16.3°, 7097 rpm) -> 172 yds ± 5%
+   - Test wedge (102 mph, 24.2°, 9304 rpm) -> 136 yds ± 5%
+   - Test sidespin creates expected curve direction
+   - Test high elevation (Denver) increases carry
+   - Test headwind decreases carry
+   - Test tailwind increases carry
+
+2. Create src/gc2_connect/open_range/physics/engine.py:
+
+```python
+"""
+ABOUTME: Complete golf ball physics engine integrating flight and ground phases.
+ABOUTME: Provides single simulate() method for full shot trajectory.
+"""
+
+from ..models import ShotResult, ShotSummary, LaunchData, Conditions, TrajectoryPoint, Phase
+from .trajectory import FlightSimulator, SimulationState
+from .ground import GroundPhysics
+from .constants import MAX_BOUNCES
+
+class PhysicsEngine:
+    """Complete physics simulation from launch to rest"""
+
+    def __init__(
+        self,
+        conditions: Conditions | None = None,
+        surface: str = "Fairway",
+        dt: float = 0.01
+    ):
+        self.conditions = conditions or Conditions()
+        self.surface = surface
+        self.dt = dt
+        self.flight_sim = FlightSimulator(self.conditions, dt)
+        self.ground = GroundPhysics(surface)
+
+    def simulate(
+        self,
+        ball_speed_mph: float,
+        vla_deg: float,
+        hla_deg: float,
+        backspin_rpm: float,
+        sidespin_rpm: float
+    ) -> ShotResult:
+        """
+        Run complete simulation from launch to rest.
+
+        Phases:
+        1. FLIGHT: RK4 integration until y <= 0
+        2. BOUNCE: Apply bounce physics, return to flight if speed > threshold
+        3. ROLLING: Decelerate until stopped
+        4. STOPPED: Record final position
+
+        Returns:
+            ShotResult with full trajectory and summary metrics
+        """
+        pass
+
+    def _calculate_summary(
+        self,
+        trajectory: list[TrajectoryPoint],
+        landing_time: float,
+        total_time: float,
+        bounce_count: int
+    ) -> ShotSummary:
+        """Calculate shot summary from trajectory data"""
+        # Find carry distance (position at first landing)
+        # Find total distance (final position)
+        # Find max height and time to max height
+        pass
+```
+
+3. Performance requirements:
+   - Full simulation < 100ms
+   - Trajectory points sampled at reasonable intervals (not every 0.01s)
+   - Memory-safe (limit max trajectory points)
+
+4. Create src/gc2_connect/open_range/engine.py (high-level wrapper):
+
+```python
+"""
+ABOUTME: High-level Open Range engine that processes GC2 shot data.
+ABOUTME: Converts launch monitor input to simulated trajectory output.
+"""
+
+from .models import ShotResult, LaunchData, Conditions
+from .physics.engine import PhysicsEngine
+from ..models import GC2ShotData
+
+class OpenRangeEngine:
+    """Processes shots for Open Range visualization"""
+
+    def __init__(self, conditions: Conditions | None = None, surface: str = "Fairway"):
+        self.conditions = conditions or Conditions()
+        self.surface = surface
+        self.physics = PhysicsEngine(self.conditions, surface)
+
+    def simulate_shot(self, shot: GC2ShotData) -> ShotResult:
+        """Simulate a shot from GC2 data"""
+        return self.physics.simulate(
+            ball_speed_mph=shot.ball_speed,
+            vla_deg=shot.launch_angle,
+            hla_deg=shot.launch_direction,
+            backspin_rpm=shot.back_spin,
+            sidespin_rpm=shot.side_spin
+        )
+
+    def simulate_test_shot(self, club: str = "Driver") -> ShotResult:
+        """Generate a realistic test shot for given club"""
+        # Use typical values for club with some random variance
+        pass
+```
+
+REQUIREMENTS:
+- Validate against all test cases in docs/PHYSICS.md
+- Performance < 100ms per shot
+- Trajectory should be reasonably sampled (not thousands of points)
+- Run tests: uv run pytest tests/unit/test_open_range/test_physics_validation.py -v
+```
+
+---
+
+## Prompt 17: Mode Selection and Shot Router
+
+```text
+Implement mode selection and shot routing to direct shots to GSPro or Open Range.
+
+CONTEXT:
+- App needs to support two modes: GSPro (existing) and Open Range (new)
+- Shots from GC2 should be routed to the active mode
+- Mode can be switched without restarting app
+- See docs/TRD_OPEN_RANGE.md for ShotRouter specification
+
+TASK:
+
+1. First, write tests in tests/unit/test_shot_router.py:
+   - Test default mode is GSPRO
+   - Test can set mode to OPEN_RANGE
+   - Test mode change callback is invoked
+   - Test route_shot in GSPRO mode calls gspro_client
+   - Test route_shot in OPEN_RANGE mode calls open_range_engine
+   - Test switching modes is graceful (no errors)
+
+2. Create src/gc2_connect/services/__init__.py
+
+3. Create src/gc2_connect/services/shot_router.py:
+
+```python
+"""
+ABOUTME: Routes shot data to GSPro or Open Range based on current mode.
+ABOUTME: Handles mode switching and destination management.
+"""
+
+from enum import Enum
+from typing import Callable, Awaitable
+from ..models import GC2ShotData
+from ..gspro.client import GSProClient
+from ..open_range.engine import OpenRangeEngine
+from ..open_range.models import ShotResult
+
+class AppMode(str, Enum):
+    GSPRO = "gspro"
+    OPEN_RANGE = "open_range"
+
+class ShotRouter:
+    """Routes shots between GSPro and Open Range modes"""
+
+    def __init__(self):
+        self._mode = AppMode.GSPRO
+        self._gspro_client: GSProClient | None = None
+        self._open_range_engine: OpenRangeEngine | None = None
+        self._mode_change_callback: Callable[[AppMode], Awaitable[None]] | None = None
+        self._shot_result_callback: Callable[[ShotResult], Awaitable[None]] | None = None
+
+    @property
+    def mode(self) -> AppMode:
+        return self._mode
+
+    async def set_mode(self, mode: AppMode) -> None:
+        """Switch between modes"""
+        if mode == self._mode:
+            return
+
+        # Cleanup previous mode if needed
+        if self._mode == AppMode.GSPRO and self._gspro_client:
+            # Don't disconnect GSPro, just stop sending to it
+            pass
+
+        self._mode = mode
+
+        if self._mode_change_callback:
+            await self._mode_change_callback(mode)
+
+    def set_gspro_client(self, client: GSProClient) -> None:
+        self._gspro_client = client
+
+    def set_open_range_engine(self, engine: OpenRangeEngine) -> None:
+        self._open_range_engine = engine
+
+    def on_mode_change(self, callback: Callable[[AppMode], Awaitable[None]]) -> None:
+        self._mode_change_callback = callback
+
+    def on_shot_result(self, callback: Callable[[ShotResult], Awaitable[None]]) -> None:
+        """Callback for Open Range shot results"""
+        self._shot_result_callback = callback
+
+    async def route_shot(self, shot: GC2ShotData) -> None:
+        """Route shot to appropriate destination"""
+        if self._mode == AppMode.GSPRO:
+            await self._route_to_gspro(shot)
+        else:
+            await self._route_to_open_range(shot)
+
+    async def _route_to_gspro(self, shot: GC2ShotData) -> None:
+        """Send shot to GSPro"""
+        if not self._gspro_client:
+            raise RuntimeError("GSPro client not configured")
+        # Existing GSPro send logic
+        pass
+
+    async def _route_to_open_range(self, shot: GC2ShotData) -> None:
+        """Process shot in Open Range"""
+        if not self._open_range_engine:
+            raise RuntimeError("Open Range engine not configured")
+
+        result = self._open_range_engine.simulate_shot(shot)
+
+        if self._shot_result_callback:
+            await self._shot_result_callback(result)
+```
+
+4. Add AppMode to models or services for import elsewhere
+
+REQUIREMENTS:
+- Mode switching should be fast (no delays)
+- GSPro connection stays open when switching to Open Range
+- Open Range doesn't require GSPro connection
+- Run tests: uv run pytest tests/unit/test_shot_router.py -v
+```
+
+---
+
+## Prompt 18: Open Range Settings Extension
+
+```text
+Extend the Settings module to include Open Range configuration.
+
+CONTEXT:
+- Settings class exists in gc2_connect/config/settings.py
+- Need to add Open Range-specific settings
+- Settings should persist between sessions
+- See docs/TRD_OPEN_RANGE.md for settings schema
+
+TASK:
+
+1. First, write tests in tests/unit/test_open_range_settings.py:
+   - Test OpenRangeSettings default values
+   - Test conditions defaults (70°F, sea level, 50% humidity)
+   - Test surface default is "Fairway"
+   - Test settings save and load roundtrip
+   - Test settings migration from v1 to v2 schema
+
+2. Update src/gc2_connect/config/settings.py:
+
+```python
+# Add to existing file
+
+class ConditionsSettings(BaseModel):
+    """Environmental conditions for Open Range"""
+    temp_f: float = 70.0
+    elevation_ft: float = 0.0
+    humidity_pct: float = 50.0
+    wind_speed_mph: float = 0.0
+    wind_dir_deg: float = 0.0
+
+class OpenRangeSettings(BaseModel):
+    """Open Range specific settings"""
+    conditions: ConditionsSettings = Field(default_factory=ConditionsSettings)
+    surface: str = "Fairway"
+    show_trajectory: bool = True
+    camera_follow: bool = True
+
+# Update main Settings class
+class Settings(BaseSettings):
+    version: int = 2  # Bump version
+    mode: str = "gspro"  # Default mode
+    gspro: GSProSettings = Field(default_factory=GSProSettings)
+    gc2: GC2Settings = Field(default_factory=GC2Settings)
+    ui: UISettings = Field(default_factory=UISettings)
+    open_range: OpenRangeSettings = Field(default_factory=OpenRangeSettings)  # NEW
+```
+
+3. Add settings migration for version 1 -> 2:
+   - If loaded settings have version 1, add open_range with defaults
+   - Save migrated settings
+
+4. Update Settings schema version handling:
+   - Read version field first
+   - Apply migrations as needed
+   - Save with current version
+
+REQUIREMENTS:
+- Backwards compatible with existing settings files
+- Automatic migration from v1 to v2
+- Default mode remains "gspro" for existing users
+- Run tests: uv run pytest tests/unit/test_open_range_settings.py -v
+```
+
+---
+
+## Prompt 19: 3D Driving Range Visualization
+
+```text
+Create the 3D driving range visualization using NiceGUI's Three.js integration.
+
+CONTEXT:
+- NiceGUI provides ui.scene() for Three.js integration
+- Need to render a driving range environment
+- Ball flight animation along trajectory
+- Camera following the ball
+- See docs/PRD_OPEN_RANGE.md F2, F3, F4 for requirements
+
+TASK:
+
+1. First, write tests in tests/unit/test_open_range/test_visualization.py:
+   - Test RangeScene can be created
+   - Test distance markers are placed correctly
+   - Test ball can be added to scene
+   - Test trajectory animation frames are calculated correctly
+   - Test camera position updates with ball
+
+2. Create src/gc2_connect/open_range/visualization/__init__.py
+
+3. Create src/gc2_connect/open_range/visualization/range_scene.py:
+
+```python
+"""
+ABOUTME: 3D driving range environment using NiceGUI Three.js.
+ABOUTME: Creates the visual scene with ground, markers, and lighting.
+"""
+
+from nicegui import ui
+
+class RangeScene:
+    """3D driving range environment"""
+
+    def __init__(self, width: int = 800, height: int = 600):
+        self.width = width
+        self.height = height
+        self.scene = None
+        self.ball = None
+        self.trajectory_line = None
+
+    def build(self) -> ui.scene:
+        """Create and return the 3D scene"""
+        self.scene = ui.scene(width=self.width, height=self.height)
+        with self.scene:
+            self._create_ground()
+            self._create_distance_markers()
+            self._create_target_greens()
+            self._setup_lighting()
+            self._setup_camera()
+        return self.scene
+
+    def _create_ground(self):
+        """Create the driving range ground plane"""
+        # Green fairway extending to 350 yards
+        pass
+
+    def _create_distance_markers(self):
+        """Add distance markers every 25-50 yards"""
+        # Markers at 50, 100, 150, 200, 250, 300 yards
+        pass
+
+    def _create_target_greens(self):
+        """Add target greens at common distances"""
+        # Greens at 75, 125, 175, 225, 275 yards
+        pass
+
+    def _setup_lighting(self):
+        """Configure scene lighting (dark theme friendly)"""
+        pass
+
+    def _setup_camera(self):
+        """Set initial camera position behind ball"""
+        pass
+```
+
+4. Create src/gc2_connect/open_range/visualization/ball_animation.py:
+
+```python
+"""
+ABOUTME: Ball flight animation along trajectory path.
+ABOUTME: Handles smooth animation with phase transitions.
+"""
+
+from ..models import TrajectoryPoint, Phase, ShotResult
+
+class BallAnimator:
+    """Animates ball along trajectory"""
+
+    def __init__(self, scene: "RangeScene"):
+        self.scene = scene
+        self.current_frame = 0
+        self.trajectory: list[TrajectoryPoint] = []
+        self.is_animating = False
+
+    async def animate_shot(self, result: ShotResult, speed: float = 1.0):
+        """Animate ball along trajectory"""
+        self.trajectory = result.trajectory
+        self.is_animating = True
+
+        for point in self.trajectory:
+            if not self.is_animating:
+                break
+
+            # Update ball position
+            # Update camera to follow
+            # Update phase indicator
+            # Wait for frame timing
+            pass
+
+        self.is_animating = False
+
+    def stop(self):
+        """Stop current animation"""
+        self.is_animating = False
+
+    def reset(self):
+        """Reset ball to starting position"""
+        pass
+```
+
+5. Coordinate system for visualization:
+   - X = forward (toward targets), in yards
+   - Y = height, in feet (scale to scene units)
+   - Z = lateral (left/right), in yards
+   - Scale factor: 1 yard = 1 scene unit (or appropriate scale)
+
+REQUIREMENTS:
+- Scene loads within 2 seconds
+- Target 60 FPS animation
+- Dark theme friendly colors
+- Camera smoothly follows ball
+- Run tests: uv run pytest tests/unit/test_open_range/test_visualization.py -v
+```
+
+---
+
+## Prompt 20: Open Range UI Panel and Data Display
+
+```text
+Create the Open Range UI panel with shot data display and phase indicators.
+
+CONTEXT:
+- Need mode selector to switch between GSPro and Open Range
+- Open Range view includes 3D scene + data panels
+- Real-time shot data display during/after animation
+- Phase indicators: Flight, Bounce, Rolling, Stopped
+- See docs/PRD_OPEN_RANGE.md F5, F6 for data display requirements
+
+TASK:
+
+1. First, write tests in tests/integration/test_open_range_ui.py:
+   - Test mode selector toggles between modes
+   - Test Open Range panel shows when in Open Range mode
+   - Test shot data displays correctly after simulation
+   - Test phase indicator updates during animation
+
+2. Create src/gc2_connect/ui/components/__init__.py
+
+3. Create src/gc2_connect/ui/components/mode_selector.py:
+
+```python
+"""
+ABOUTME: Mode selector component for switching between GSPro and Open Range.
+ABOUTME: Provides toggle UI and handles mode change callbacks.
+"""
+
+from nicegui import ui
+from ...services.shot_router import AppMode
+
+class ModeSelector:
+    """Toggle between GSPro and Open Range modes"""
+
+    def __init__(self, on_change: Callable[[AppMode], Awaitable[None]]):
+        self.on_change = on_change
+        self.current_mode = AppMode.GSPRO
+        self.toggle = None
+
+    def build(self):
+        """Create the mode selector UI"""
+        with ui.row().classes('gap-4 items-center'):
+            ui.label('Mode:').classes('text-lg')
+            self.toggle = ui.toggle(
+                {AppMode.GSPRO.value: 'GSPro', AppMode.OPEN_RANGE.value: 'Open Range'},
+                value=AppMode.GSPRO.value,
+                on_change=self._handle_change
+            ).classes('bg-gray-800')
+
+    async def _handle_change(self, e):
+        self.current_mode = AppMode(e.value)
+        await self.on_change(self.current_mode)
+```
+
+4. Create src/gc2_connect/ui/components/open_range_view.py:
+
+```python
+"""
+ABOUTME: Open Range view component with 3D scene and data display.
+ABOUTME: Main UI for the built-in driving range simulator.
+"""
+
+from nicegui import ui
+from ...open_range.models import ShotResult, Phase
+from ...open_range.visualization.range_scene import RangeScene
+from ...open_range.visualization.ball_animation import BallAnimator
+
+class OpenRangeView:
+    """Complete Open Range UI panel"""
+
+    def __init__(self):
+        self.range_scene: RangeScene | None = None
+        self.animator: BallAnimator | None = None
+        self.current_phase = Phase.STOPPED
+
+        # UI elements
+        self.phase_label = None
+        self.carry_label = None
+        self.total_label = None
+        self.height_label = None
+        self.offline_label = None
+
+    def build(self):
+        """Create the Open Range view"""
+        with ui.row().classes('w-full gap-4'):
+            # Left: 3D scene
+            with ui.column().classes('flex-grow'):
+                self.range_scene = RangeScene(width=800, height=500)
+                self.range_scene.build()
+                self.animator = BallAnimator(self.range_scene)
+
+            # Right: Data panel
+            with ui.column().classes('w-64 gap-2'):
+                self._build_phase_indicator()
+                self._build_shot_data_panel()
+                self._build_launch_data_panel()
+                self._build_conditions_panel()
+
+    def _build_phase_indicator(self):
+        """Phase indicator with color coding"""
+        with ui.card().classes('w-full'):
+            ui.label('Phase').classes('text-sm text-gray-400')
+            self.phase_label = ui.label('Ready').classes('text-xl font-bold')
+
+    def _build_shot_data_panel(self):
+        """Shot result metrics"""
+        with ui.card().classes('w-full'):
+            ui.label('Shot Data').classes('text-sm text-gray-400')
+            with ui.column().classes('gap-1'):
+                self.carry_label = ui.label('Carry: --')
+                self.total_label = ui.label('Total: --')
+                self.offline_label = ui.label('Offline: --')
+                self.height_label = ui.label('Max Height: --')
+
+    def _build_launch_data_panel(self):
+        """Launch conditions from GC2"""
+        pass
+
+    def _build_conditions_panel(self):
+        """Environmental conditions"""
+        pass
+
+    async def show_shot(self, result: ShotResult):
+        """Display and animate a shot"""
+        await self.animator.animate_shot(result)
+        self._update_data_display(result)
+
+    def _update_data_display(self, result: ShotResult):
+        """Update data labels with shot result"""
+        s = result.summary
+        self.carry_label.text = f'Carry: {s.carry_distance:.1f} yds'
+        self.total_label.text = f'Total: {s.total_distance:.1f} yds'
+        self.offline_label.text = f'Offline: {s.offline_distance:+.1f} yds'
+        self.height_label.text = f'Max Height: {s.max_height:.1f} ft'
+
+    def update_phase(self, phase: Phase):
+        """Update phase indicator"""
+        self.current_phase = phase
+        colors = {
+            Phase.FLIGHT: 'text-green-400',
+            Phase.BOUNCE: 'text-orange-400',
+            Phase.ROLLING: 'text-blue-400',
+            Phase.STOPPED: 'text-gray-400'
+        }
+        self.phase_label.classes(replace=colors.get(phase, ''))
+        self.phase_label.text = phase.value.capitalize()
+```
+
+5. Update src/gc2_connect/ui/app.py:
+   - Add mode selector to header
+   - Add OpenRangeView component
+   - Show/hide GSPro panel vs Open Range panel based on mode
+   - Wire shot router to appropriate view
+
+REQUIREMENTS:
+- Clear visual distinction between modes
+- Data updates in real-time during animation
+- Phase colors: Flight=green, Bounce=orange, Rolling=blue, Stopped=gray
+- Run tests: uv run pytest tests/integration/test_open_range_ui.py -v
+```
+
+---
+
+## Prompt 21: Open Range Full Integration and Testing
+
+```text
+Wire together all Open Range components and create comprehensive integration tests.
+
+CONTEXT:
+- All Open Range components are implemented
+- Need to integrate into main app
+- Test complete flow: GC2 shot -> Physics -> Animation -> Display
+- Ensure mode switching works correctly
+
+TASK:
+
+1. Create tests/integration/test_open_range_flow.py:
+   - Test: Shot from MockGC2 -> Open Range engine -> Visualization
+   - Test: Mode switch from GSPro to Open Range
+   - Test: Mode switch back to GSPro
+   - Test: Multiple shots in Open Range mode
+   - Test: Settings changes update engine (conditions, surface)
+
+2. Update src/gc2_connect/ui/app.py:
+   - Add ModeSelector to header area
+   - Create OpenRangeView instance
+   - Create ShotRouter instance
+   - Wire GC2 reader to shot router
+   - Wire shot router to appropriate destination
+   - Handle mode-specific UI visibility
+
+3. Integration wiring:
+```python
+# In GC2ConnectApp.__init__
+self.shot_router = ShotRouter()
+self.open_range_engine = OpenRangeEngine()
+self.open_range_view = OpenRangeView()
+
+# Wire components
+self.shot_router.set_gspro_client(self.gspro_client)
+self.shot_router.set_open_range_engine(self.open_range_engine)
+self.shot_router.on_shot_result(self._on_open_range_shot)
+self.shot_router.on_mode_change(self._on_mode_change)
+
+# In _on_shot_received (modify existing)
+async def _on_shot_received(self, shot: GC2ShotData):
+    await self.shot_router.route_shot(shot)
+    # History still updates regardless of mode
+    self.shot_history.append(shot)
+```
+
+4. Mode-specific UI:
+   - When GSPRO: Show GSPro connection panel, hide Open Range view
+   - When OPEN_RANGE: Show Open Range view, hide GSPro panel (but keep connection status)
+
+5. Test shot button updates:
+   - In GSPRO mode: Sends test shot to GSPro
+   - In OPEN_RANGE mode: Simulates test shot in Open Range
+
+6. Performance validation:
+   - Measure physics calculation time
+   - Measure animation frame rate
+   - Log warnings if thresholds exceeded
+
+REQUIREMENTS:
+- Seamless mode switching
+- Shot history works in both modes
+- Settings apply correctly to Open Range
+- No errors during mode transitions
+- Run tests: uv run pytest tests/integration/test_open_range_flow.py -v
+```
+
+---
+
+# PHASE 6: POLISH & PACKAGING
+
+## Prompt 22: End-to-End Tests
 
 ```text
 Create end-to-end tests that verify the complete application works correctly.
@@ -597,7 +1725,7 @@ Create end-to-end tests that verify the complete application works correctly.
 CONTEXT:
 - E2E tests should test the actual NiceGUI application
 - Use browser automation or NiceGUI's test utilities
-- Focus on critical user flows
+- Focus on critical user flows for both GSPro and Open Range modes
 
 TASK:
 
@@ -610,14 +1738,17 @@ TASK:
    - Test: App loads and displays correctly
    - Test: Can connect to mock GC2
    - Test: Can configure GSPro connection settings
-   - Test: Mock shot appears in UI
-   - Test: Shot history updates
+   - Test: Mock shot appears in UI (GSPro mode)
+   - Test: Can switch to Open Range mode
+   - Test: Mock shot animates in Open Range
+   - Test: Shot history updates in both modes
    - Test: Settings persist after restart
 
 3. Create tests/e2e/test_error_handling.py:
    - Test: Clear error when GC2 not found
    - Test: Clear error when GSPro connection fails
    - Test: App recovers from errors gracefully
+   - Test: Mode switch works even with GSPro disconnected
 
 4. Focus on:
    - User-facing behavior, not implementation details
@@ -633,7 +1764,7 @@ REQUIREMENTS:
 
 ---
 
-## Prompt 13: Type Checking & Linting Cleanup
+## Prompt 23: Type Checking & Linting Cleanup
 
 ```text
 Fix all type checking and linting issues in the codebase.
@@ -642,6 +1773,7 @@ CONTEXT:
 - mypy is configured but may have errors
 - ruff is configured for linting
 - All code should pass both checks
+- New Open Range code needs verification
 
 TASK:
 
@@ -662,6 +1794,7 @@ TASK:
    - Callback type annotations
    - Async function return types
    - Pydantic model typing
+   - NiceGUI element typing
 
 4. Update pyproject.toml if needed:
    - Add any missing type stubs
@@ -681,25 +1814,26 @@ REQUIREMENTS:
 
 ---
 
-## Prompt 14: Documentation & README
+## Prompt 24: Documentation & Release
 
 ```text
-Create comprehensive documentation for users and developers.
+Create comprehensive documentation and prepare for v1.1.0 release.
 
 CONTEXT:
-- README.md exists but may need updates
-- Users need setup instructions
-- Developers need contribution guidelines
+- README.md exists but needs updates for Open Range
+- Users need setup instructions for both modes
+- v1.1.0 adds the Open Range feature
 
 TASK:
 
 1. Update README.md:
-   - Clear project description
-   - Screenshots of the UI (describe where to add them)
+   - Clear project description (now includes Open Range)
+   - Feature overview (GSPro connector + built-in range)
+   - Screenshots (add placeholders for Open Range UI)
    - Installation instructions (macOS and Linux)
-   - Quick start guide
-   - Configuration options
-   - Troubleshooting section (USB permissions, network issues)
+   - Quick start guide (both modes)
+   - Configuration options (including Open Range settings)
+   - Troubleshooting section
 
 2. Create CONTRIBUTING.md:
    - Development setup
@@ -708,96 +1842,72 @@ TASK:
    - Pull request process
 
 3. Update docs/:
-   - Verify PRD.md is current
-   - Verify TRD.md is current
-   - Add any new technical decisions
+   - Verify PRD_OPEN_RANGE.md is current
+   - Verify TRD_OPEN_RANGE.md is current
+   - Verify PHYSICS.md matches implementation
+   - Add CHANGELOG.md with v1.1.0 notes
 
 4. Add inline documentation:
    - Ensure all public functions have docstrings
    - Add module-level docstrings
-   - Document any complex logic
+   - Document physics calculations
 
 5. Create USB permission guides:
    - docs/LINUX_USB_SETUP.md with udev rules
    - docs/MACOS_USB_SETUP.md if needed
 
+6. Final testing & packaging:
+   - Run full test suite with coverage
+   - uv run pytest --cov=gc2_connect --cov-report=html
+   - Target: >80% coverage
+   - Verify package builds: uv build
+   - Test entry point: gc2-connect command
+
+7. Version bump:
+   - Update version in pyproject.toml to 1.1.0
+   - Update any version references in docs
+
 REQUIREMENTS:
 - Documentation should be clear for non-technical users
 - Include actual commands that can be copy/pasted
 - Test that all documented commands work
-```
-
----
-
-## Prompt 15: Final Testing & Packaging
-
-```text
-Perform final testing and prepare for distribution.
-
-CONTEXT:
-- All features are implemented
-- All tests should pass
-- Need to package for distribution
-
-TASK:
-
-1. Run full test suite with coverage:
-   - uv run pytest --cov=gc2_connect --cov-report=html
-   - Review coverage report
-   - Add tests for any uncovered critical paths
-   - Target: >80% coverage
-
-2. Manual testing checklist:
-   - [ ] App starts without errors
-   - [ ] Mock GC2 connects and sends test shots
-   - [ ] Test shots appear in UI
-   - [ ] Settings are saved and loaded
-   - [ ] GSPro connection works (with mock server)
-   - [ ] Shot history displays correctly
-   - [ ] CSV export works
-   - [ ] Error messages are clear
-
-3. Packaging:
-   - Verify pyproject.toml is complete
-   - Test: uv build
-   - Verify package installs correctly
-   - Test entry point: gc2-connect command
-
-4. Create GitHub release assets:
-   - Source distribution
-   - Wheel
-   - (Optional) PyInstaller executable
-
-5. Final cleanup:
-   - Remove any debug code
-   - Verify no hardcoded test values
-   - Check for TODO comments that need addressing
-
-REQUIREMENTS:
-- All tests pass
-- No linting errors
-- Package builds successfully
-- App runs from installed package
+- Package builds and installs successfully
 ```
 
 ---
 
 # Implementation Order Summary
 
-1. **Prompt 1**: Testing infrastructure setup
-2. **Prompt 2**: Add ABOUTME comments
-3. **Prompt 3**: Unit tests for models
-4. **Prompt 4**: Unit tests for GC2 protocol
-5. **Prompt 5**: Unit tests for GSPro client
-6. **Prompt 6**: Settings module (TDD)
-7. **Prompt 7**: Integrate settings into UI
+## Phase 1-3: Foundation (Completed)
+1. **Prompt 1**: Testing infrastructure setup ✅
+2. **Prompt 2**: Add ABOUTME comments ✅
+3. **Prompt 3**: Unit tests for models ✅
+4. **Prompt 4**: Unit tests for GC2 protocol ✅
+5. **Prompt 5**: Unit tests for GSPro client ✅
+6. **Prompt 6**: Settings module (TDD) ✅
+7. **Prompt 7**: Integrate settings into UI ✅
+
+## Phase 3-4: Reliability & Features
 8. **Prompt 8**: Auto-reconnection logic
 9. **Prompt 9**: Integration tests
 10. **Prompt 10**: Shot history improvements
 11. **Prompt 11**: CSV export
-12. **Prompt 12**: End-to-end tests
-13. **Prompt 13**: Type checking cleanup
-14. **Prompt 14**: Documentation
-15. **Prompt 15**: Final testing & packaging
+
+## Phase 5: Open Range Feature
+12. **Prompt 12**: Open Range data models & constants
+13. **Prompt 13**: Aerodynamics module
+14. **Prompt 14**: Trajectory simulation (RK4)
+15. **Prompt 15**: Ground physics (bounce/roll)
+16. **Prompt 16**: Physics engine integration
+17. **Prompt 17**: Mode selection & shot router
+18. **Prompt 18**: Open Range settings
+19. **Prompt 19**: 3D driving range visualization
+20. **Prompt 20**: Open Range UI panel
+21. **Prompt 21**: Open Range integration
+
+## Phase 6: Polish & Release
+22. **Prompt 22**: End-to-end tests
+23. **Prompt 23**: Type checking cleanup
+24. **Prompt 24**: Documentation & release
 
 Each prompt builds on previous work. No orphaned code - everything is integrated.
