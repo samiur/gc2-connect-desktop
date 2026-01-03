@@ -319,9 +319,58 @@ SIDE_RPM=-320
 
 ### 0M Messages (Ball Tracking)
 
-Real-time ball position updates during flight through the camera's field of view. These messages are sent while the ball is being tracked and typically contain position/detection data rather than final shot metrics.
+Real-time ball position updates and device status. The GC2 sends these messages continuously to indicate:
+- Device readiness (green/red light status)
+- Ball detection and position
 
-**Recommendation:** Skip 0M messages when parsing shot data. Only accumulate fields from 0H messages.
+**Message Format:**
+```
+0M
+FLAGS=<bitmask>
+BALLS=<count>
+BALL1=<x>,<y>,<z>
+
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `FLAGS` | int | Bitmask indicating device readiness (see below) |
+| `BALLS` | int | Number of balls detected (0 = no ball, 1+ = ball detected) |
+| `BALL1` | string | Position of first ball as "x,y,z" coordinates |
+
+**FLAGS Values:**
+| Value | Binary | Status |
+|-------|--------|--------|
+| 1 | 001 | Red light - Not ready |
+| 7 | 111 | Green light - Fully ready |
+
+The FLAGS field appears to be a 3-bit bitmask where all bits set (7) indicates the device is fully ready.
+
+**Example 0M Messages:**
+```
+0M
+FLAGS=1
+BALLS=1
+BALL1=198,206,12
+
+```
+(Red light, ball detected)
+
+```
+0M
+FLAGS=7
+BALLS=1
+BALL1=198,206,12
+
+```
+(Green light, ball detected)
+
+**Usage:** 0M messages can be used to:
+1. Update GSPro's `LaunchMonitorIsReady` flag (FLAGS == 7)
+2. Update GSPro's `LaunchMonitorBallDetected` flag (BALLS > 0)
+3. Display ball readiness status in the UI
+
+**Recommendation:** Process 0M messages separately from shot data (0H messages). Do not accumulate 0M fields into the shot accumulator.
 
 ### Data Accumulation Strategy
 

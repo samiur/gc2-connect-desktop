@@ -287,9 +287,11 @@ class GC2ConnectApp:
 - **Product ID**: 0x0110 (272) - GC2
 
 ### Communication
-- **Interface**: USB Bulk Transfer
+- **Interface**: USB Interrupt Transfer (endpoint 0x82)
 - **Direction**: Device to Host (IN endpoint)
 - **Format**: ASCII text, key=value pairs, newline-separated
+- **Message Terminator**: `\n\t` (newline + tab) indicates end of complete message
+- **Packet Size**: 64 bytes (data split across multiple packets)
 
 ### Data Format
 
@@ -332,11 +334,35 @@ HMT=1
 | LOFT_DEG | degrees | Dynamic loft (HMT) | 0-60 |
 | HMT | boolean | HMT data present | 0 or 1 |
 
+### Message Types
+
+The GC2 sends two types of messages:
+
+| Prefix | Name | Description |
+|--------|------|-------------|
+| `0H` | Shot Header | Shot metrics (speed, spin, launch angle, etc.) |
+| `0M` | Ball Movement | Device status and ball detection |
+
+### 0M Message Format (Ball Status)
+
+```
+0M
+FLAGS=<bitmask>
+BALLS=<count>
+BALL1=<x>,<y>,<z>
+```
+
+| Field | Description |
+|-------|-------------|
+| FLAGS | Device readiness: 1=red light (not ready), 7=green light (ready) |
+| BALLS | Number of balls detected (0 or 1+) |
+| BALL1 | Ball position as x,y,z coordinates |
+
 ### Validation Rules
 
-1. **Reject if**: `SPIN_RPM == 0` (misread)
+1. **Reject if**: `BACK_RPM == 0 && SIDE_RPM == 0` (misread - camera lost ball)
 2. **Reject if**: `BACK_RPM == 2222` (known error pattern)
-3. **Reject if**: `SPEED_MPH < 10 || SPEED_MPH > 250`
+3. **Reject if**: `SPEED_MPH <= 0 || SPEED_MPH > 250`
 4. **Ignore if**: `SHOT_ID` same as previous (duplicate)
 
 ---
@@ -380,6 +406,28 @@ HMT=1
   "ShotDataOptions": {
     "ContainsBallData": true,
     "ContainsClubData": true,
+    "LaunchMonitorIsReady": true,
+    "LaunchMonitorBallDetected": true,
+    "IsHeartBeat": false
+  }
+}
+```
+
+### Status Messages
+
+Non-shot messages can be sent to update GSPro on device status:
+
+```json
+{
+  "DeviceID": "GC2 Connect",
+  "Units": "Yards",
+  "ShotNumber": 0,
+  "APIversion": "1",
+  "BallData": {},
+  "ClubData": {},
+  "ShotDataOptions": {
+    "ContainsBallData": false,
+    "ContainsClubData": false,
     "LaunchMonitorIsReady": true,
     "LaunchMonitorBallDetected": true,
     "IsHeartBeat": false

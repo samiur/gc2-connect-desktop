@@ -6,6 +6,7 @@ A cross-platform desktop application to read Foresight GC2 launch monitor data a
 
 - 📡 USB connection to GC2 launch monitor
 - 🎯 Real-time shot data display
+- 🟢 Ball status indicators (ready/ball detected) synced with GC2 LEDs
 - 🌐 Remote connection to GSPro via Open Connect API v1
 - 📊 Shot history tracking
 - 🧪 Mock mode for testing without hardware
@@ -75,6 +76,8 @@ sudo udevadm trigger
 1. Connect your GC2 via USB
 2. Click "Connect" in the GC2 panel
 3. The status should change to "Connected"
+4. The Ready indicator turns green when the GC2 light is green
+5. The Ball indicator lights up when a ball is detected
 
 ### Connecting to GSPro
 

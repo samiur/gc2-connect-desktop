@@ -17,7 +17,11 @@ This is a Python desktop application for Mac and Linux that reads shot data from
 ### GC2 USB Communication
 - VID: 0x2C79 (11385), PID: 0x0110 (272)
 - Protocol: ASCII text, key=value pairs, newline-separated
-- Interface: USB Bulk Transfer (IN endpoint)
+- Interface: USB Interrupt Transfer (endpoint 0x82)
+- Message types:
+  - `0H`: Shot data (ball speed, spin, launch angles)
+  - `0M`: Ball status (device readiness, ball detection)
+- Message terminator: `\n\t` indicates complete message
 - See `docs/GC2_PROTOCOL.md` for full specification
 
 ### GSPro Integration
@@ -83,8 +87,9 @@ uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
 
 1. **USB Permissions**: Linux may require udev rules for non-root USB access
 2. **Mock Mode**: Built-in mock GC2 for testing without hardware
-3. **Shot Validation**: Zero spin shots are misreads - reject them
+3. **Shot Validation**: Zero spin (back_spin=0 AND side_spin=0) and 2222 backspin are misreads - reject them
 4. **Reconnection**: Both USB and network should auto-reconnect
+5. **Ball Status**: GC2 sends 0M messages with FLAGS (1=red light, 7=green light) and BALLS count for UI indicators
 
 ## Related Documentation
 
