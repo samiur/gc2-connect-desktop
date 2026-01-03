@@ -73,10 +73,10 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Test connection handling
   - [x] Create test fixtures
 
-- [ ] **Prompt 10**: Shot History Improvements
-  - [ ] Create ShotHistoryManager
-  - [ ] Add session statistics
-  - [ ] Improve UI performance
+- [x] **Prompt 10**: Shot History Improvements
+  - [x] Create ShotHistoryManager
+  - [x] Add session statistics
+  - [x] Improve UI performance
 
 - [ ] **Prompt 11**: CSV Export
   - [ ] Implement export function
