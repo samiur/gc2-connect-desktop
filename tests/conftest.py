@@ -79,11 +79,37 @@ def sample_gspro_message(sample_gc2_shot: GC2ShotData) -> GSProShotMessage:
 
 @pytest.fixture
 def mock_socket():
-    """Fixture providing a mock socket for GSPro client testing."""
+    """Fixture providing a mock socket for GSPro client testing.
+
+    The mock properly handles:
+    - setblocking() to track blocking mode
+    - recv() raises BlockingIOError when in non-blocking mode (simulates empty buffer)
+    - settimeout() to set timeout
+    """
     mock = MagicMock()
     mock.connect.return_value = None
     mock.sendall.return_value = None
     mock.close.return_value = None
+    mock.setblocking.return_value = None
+    mock.settimeout.return_value = None
+    mock.setsockopt.return_value = None
+
+    # Track blocking mode state
+    mock._blocking = True
+
+    def setblocking(blocking: bool):
+        mock._blocking = blocking
+
+    def recv_side_effect(_size: int):
+        # In non-blocking mode, raise BlockingIOError to simulate empty buffer
+        if not mock._blocking:
+            raise BlockingIOError("Resource temporarily unavailable")
+        # In blocking mode, return whatever is configured via return_value
+        return mock.recv.return_value
+
+    mock.setblocking.side_effect = setblocking
+    mock.recv.side_effect = recv_side_effect
+
     return mock
 
 

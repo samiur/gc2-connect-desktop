@@ -256,7 +256,7 @@ class TestGSProShotMessageFromGC2Shot:
         assert message.DeviceID == "GC2 Connect"
         assert message.Units == "Yards"
 
-        # Ball data should be populated
+        # Ball data should be populated (speed sent as mph directly)
         assert message.BallData.Speed == sample_gc2_shot.ball_speed
         assert message.BallData.TotalSpin == sample_gc2_shot.total_spin
         assert message.BallData.BackSpin == sample_gc2_shot.back_spin

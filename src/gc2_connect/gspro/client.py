@@ -61,18 +61,22 @@ class GSProClient:
     def connect(self) -> bool:
         """Connect to GSPro."""
         try:
-            self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # Use create_connection for cleaner connection handling
+            self._socket = socket.create_connection(
+                (self.host, self.port),
+                timeout=5.0
+            )
+            # Set TCP_NODELAY to disable Nagle's algorithm for immediate sends
+            self._socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self._socket.settimeout(5.0)
-            self._socket.connect((self.host, self.port))
             self._connected = True
             logger.info(f"Connected to GSPro at {self.host}:{self.port}")
 
-            # Send initial heartbeat to register the device
-            response = self.send_heartbeat()
-            if response:
-                logger.info(f"GSPro handshake successful: {response.Message}")
-            else:
-                logger.warning("No response to initial heartbeat (GSPro may still work)")
+            # Send initial heartbeat to register with GSPro
+            # Note: GSPro doesn't respond to heartbeats, so we just send it
+            logger.info("Sending initial heartbeat to GSPro...")
+            self.send_heartbeat()
+            logger.info("Initial heartbeat sent")
 
             return True
         except OSError as e:
@@ -108,7 +112,10 @@ class GSProClient:
         return self._send_message(message)
 
     def send_heartbeat(self) -> GSProResponse | None:
-        """Send a heartbeat to GSPro."""
+        """Send a heartbeat to GSPro.
+
+        Note: GSPro doesn't respond to heartbeat messages, so we don't wait for a response.
+        """
         if not self._connected or not self._socket:
             return None
 
@@ -122,7 +129,7 @@ class GSProClient:
             ),
         )
 
-        return self._send_message(message)
+        return self._send_message(message, expect_response=False)
 
     def send_status(self, status: GC2BallStatus) -> GSProResponse | None:
         """Send ball status update to GSPro.
@@ -132,6 +139,8 @@ class GSProClient:
         - Whether a ball is detected
 
         This helps GSPro know when to expect shot data.
+
+        Note: GSPro doesn't respond to status messages, so we don't wait for a response.
         """
         if not self._connected or not self._socket:
             return None
@@ -150,7 +159,7 @@ class GSProClient:
         logger.debug(
             f"Sending status: ready={status.is_ready}, ball_detected={status.ball_detected}"
         )
-        return self._send_message(message)
+        return self._send_message(message, expect_response=False)
 
     async def send_status_async(self, status: GC2BallStatus) -> GSProResponse | None:
         """Async version of send_status."""
@@ -158,23 +167,53 @@ class GSProClient:
             None, self.send_status, status
         )
 
-    def _send_message(self, message: GSProShotMessage) -> GSProResponse | None:
-        """Send a message and receive response."""
+    def _send_message(
+        self, message: GSProShotMessage, expect_response: bool = True
+    ) -> GSProResponse | None:
+        """Send a message and optionally receive response.
+
+        Args:
+            message: The message to send
+            expect_response: If True, wait for and parse response. If False, just send.
+        """
         try:
-            # Send JSON message with newline delimiter (GSPro expects newline-delimited JSON)
+            # Clear any buffered data before sending (stale responses)
+            self._socket.setblocking(False)
+            try:
+                while True:
+                    stale = self._socket.recv(4096)
+                    if stale:
+                        logger.debug(f"Cleared {len(stale)} bytes of stale buffer data")
+                    else:
+                        break
+            except BlockingIOError:
+                pass  # No data to clear, good
+            finally:
+                self._socket.setblocking(True)
+
+            # Send JSON message
             json_data = json.dumps(message.to_dict())
-            self._socket.sendall((json_data + '\n').encode('utf-8'))
-            logger.debug(f"Sent: {json_data}")
+            encoded = json_data.encode('utf-8')
+            self._socket.sendall(encoded)
+            logger.debug(f"Sent {len(encoded)} bytes: {json_data}")
+
+            if not expect_response:
+                return None
 
             # Receive response
             self._socket.settimeout(5.0)
+            logger.debug("Waiting for response...")
             response_data = self._socket.recv(4096)
 
             if not response_data:
                 logger.warning("Empty response from GSPro")
                 return None
 
-            response_json = json.loads(response_data.decode('utf-8'))
+            response_str = response_data.decode('utf-8')
+
+            # Parse only the first JSON object (handle concatenated responses)
+            decoder = json.JSONDecoder()
+            response_json, _ = decoder.raw_decode(response_str)
             response = GSProResponse.from_dict(response_json)
 
             logger.debug(f"Received: {response_json}")

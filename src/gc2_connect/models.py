@@ -213,7 +213,10 @@ class GSProShotMessage:
 
     @classmethod
     def from_gc2_shot(cls, shot: GC2ShotData, shot_number: int) -> GSProShotMessage:
-        """Convert GC2 shot data to GSPro message format."""
+        """Convert GC2 shot data to GSPro message format.
+
+        Note: GSPro Open Connect API expects ball speed in mph.
+        """
         ball_data = GSProBallData(
             Speed=shot.ball_speed,
             SpinAxis=shot.spin_axis,

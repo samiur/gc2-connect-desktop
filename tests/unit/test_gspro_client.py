@@ -48,27 +48,26 @@ class TestGSProClientConnectionState:
         client = GSProClient()
         assert client.shot_number == 0
 
-    def test_connect_success(self, mock_socket_with_success_response: MagicMock):
+    def test_connect_success(self, mock_socket: MagicMock):
         """Test successful connection."""
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket_with_success_response):
+        with patch("socket.create_connection", return_value=mock_socket):
             result = client.connect()
         assert result is True
         assert client.is_connected is True
 
     def test_connect_failure(self, mock_socket: MagicMock):
         """Test failed connection."""
-        mock_socket.connect.side_effect = OSError("Connection refused")
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket):
+        with patch("socket.create_connection", side_effect=OSError("Connection refused")):
             result = client.connect()
         assert result is False
         assert client.is_connected is False
 
-    def test_disconnect(self, mock_socket_with_success_response: MagicMock):
+    def test_disconnect(self, mock_socket: MagicMock):
         """Test disconnect resets state."""
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket_with_success_response):
+        with patch("socket.create_connection", return_value=mock_socket):
             client.connect()
         assert client.is_connected is True
         client.disconnect()
@@ -91,7 +90,7 @@ class TestGSProClientMessageFormatting:
     ):
         """Test that send_shot increments the shot number."""
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket_with_success_response):
+        with patch("socket.create_connection", return_value=mock_socket_with_success_response):
             client.connect()
             assert client.shot_number == 0
 
@@ -115,7 +114,7 @@ class TestGSProClientMessageFormatting:
     ):
         """Test that send_shot sends correctly formatted JSON."""
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket_with_success_response):
+        with patch("socket.create_connection", return_value=mock_socket_with_success_response):
             client.connect()
             client.send_shot(sample_gc2_shot)
 
@@ -130,20 +129,22 @@ class TestGSProClientMessageFormatting:
         assert "BallData" in message
         assert "ShotDataOptions" in message
         assert message["ShotNumber"] == 1
+        # Ball speed is sent as mph directly to GSPro
         assert message["BallData"]["Speed"] == sample_gc2_shot.ball_speed
 
     def test_heartbeat_message_structure(
         self,
-        mock_socket_with_success_response: MagicMock,
+        mock_socket: MagicMock,
     ):
         """Test that heartbeat sends correctly formatted message."""
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket_with_success_response):
+        with patch("socket.create_connection", return_value=mock_socket):
             client.connect()
+            # Second heartbeat (first is sent during connect)
             client.send_heartbeat()
 
-        # Verify sendall was called with valid JSON
-        call_args = mock_socket_with_success_response.sendall.call_args
+        # Verify sendall was called with valid JSON (check last call)
+        call_args = mock_socket.sendall.call_args
         sent_data = call_args[0][0].decode("utf-8")
         message = json.loads(sent_data)
 
@@ -158,6 +159,17 @@ class TestGSProClientMessageFormatting:
         result = client.send_heartbeat()
         assert result is None
 
+    def test_send_heartbeat_returns_none(
+        self,
+        mock_socket: MagicMock,
+    ):
+        """Test that send_heartbeat returns None (GSPro doesn't respond to heartbeats)."""
+        client = GSProClient()
+        with patch("socket.create_connection", return_value=mock_socket):
+            client.connect()
+            result = client.send_heartbeat()
+        assert result is None
+
 
 class TestGSProClientResponseParsing:
     """Tests for GSProClient response parsing."""
@@ -169,7 +181,7 @@ class TestGSProClientResponseParsing:
     ):
         """Test parsing of success response."""
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket_with_success_response):
+        with patch("socket.create_connection", return_value=mock_socket_with_success_response):
             client.connect()
             response = client.send_shot(sample_gc2_shot)
 
@@ -184,7 +196,7 @@ class TestGSProClientResponseParsing:
     ):
         """Test parsing of response with player info."""
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket_with_player_response):
+        with patch("socket.create_connection", return_value=mock_socket_with_player_response):
             client.connect()
             response = client.send_shot(sample_gc2_shot)
 
@@ -208,7 +220,7 @@ class TestGSProClientResponseParsing:
         mock_socket.recv.return_value = json.dumps(error_response).encode("utf-8")
 
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket):
+        with patch("socket.create_connection", return_value=mock_socket):
             client.connect()
             response = client.send_shot(sample_gc2_shot)
 
@@ -226,7 +238,7 @@ class TestGSProClientResponseParsing:
         mock_socket.recv.return_value = b""
 
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket):
+        with patch("socket.create_connection", return_value=mock_socket):
             client.connect()
             response = client.send_shot(sample_gc2_shot)
 
@@ -241,7 +253,7 @@ class TestGSProClientResponseParsing:
         mock_socket.recv.return_value = b"not valid json"
 
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket):
+        with patch("socket.create_connection", return_value=mock_socket):
             client.connect()
             response = client.send_shot(sample_gc2_shot)
 
@@ -256,7 +268,7 @@ class TestGSProClientResponseParsing:
         mock_socket.recv.side_effect = TimeoutError("Timeout")
 
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket):
+        with patch("socket.create_connection", return_value=mock_socket):
             client.connect()
             response = client.send_shot(sample_gc2_shot)
 
@@ -265,15 +277,32 @@ class TestGSProClientResponseParsing:
     def test_socket_error_disconnects(
         self,
         sample_gc2_shot: GC2ShotData,
-        mock_socket: MagicMock,
     ):
         """Test that socket error sets connected to False."""
-        # First recv is for initial heartbeat (success), second is for shot (error)
-        success_response = json.dumps({"Code": 200, "Message": "OK"}).encode("utf-8")
-        mock_socket.recv.side_effect = [success_response, OSError("Connection reset")]
+        # Create a custom mock for this test
+        mock = MagicMock()
+        mock.sendall.return_value = None
+        mock.setsockopt.return_value = None
+        mock.settimeout.return_value = None
+
+        # Track blocking mode and configure recv to:
+        # 1. Raise BlockingIOError in non-blocking mode (buffer clear)
+        # 2. Raise OSError in blocking mode (simulating connection reset)
+        mock._blocking = True
+
+        def setblocking(blocking: bool):
+            mock._blocking = blocking
+
+        def recv_side_effect(_size: int):
+            if not mock._blocking:
+                raise BlockingIOError("Resource temporarily unavailable")
+            raise OSError("Connection reset")
+
+        mock.setblocking.side_effect = setblocking
+        mock.recv.side_effect = recv_side_effect
 
         client = GSProClient()
-        with patch("socket.socket", return_value=mock_socket):
+        with patch("socket.create_connection", return_value=mock):
             client.connect()
             assert client.is_connected is True
             client.send_shot(sample_gc2_shot)
@@ -314,7 +343,7 @@ class TestGSProClientCallbacks:
         client = GSProClient()
         callback = MagicMock()
 
-        with patch("socket.socket", return_value=mock_socket_with_success_response):
+        with patch("socket.create_connection", return_value=mock_socket_with_success_response):
             client.connect()
             # Add callback after connect so we only see shot responses
             client.add_response_callback(callback)
@@ -335,7 +364,7 @@ class TestGSProClientCallbacks:
         failing_callback = MagicMock(side_effect=Exception("Callback error"))
         working_callback = MagicMock()
 
-        with patch("socket.socket", return_value=mock_socket_with_success_response):
+        with patch("socket.create_connection", return_value=mock_socket_with_success_response):
             client.connect()
             # Add callbacks after connect so we only see shot responses
             client.add_response_callback(failing_callback)
