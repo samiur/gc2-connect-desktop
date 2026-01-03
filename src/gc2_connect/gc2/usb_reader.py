@@ -381,8 +381,6 @@ class GC2USBReader:
         shot_accumulator: dict[str, str] = {}  # Accumulate fields across packets
         line_buffer = ""  # Buffer for incomplete lines split across packets
         timeout_count = 0
-        spin_wait_count = 0  # Count iterations waiting for spin components
-        MAX_SPIN_WAIT = 50  # ~500ms at 10ms per iteration
 
         logger.info("Starting GC2 read loop...")
 
@@ -449,29 +447,21 @@ class GC2USBReader:
                             text, shot_accumulator, line_buffer
                         )
 
-                        # Check if we have a new shot ready to process
-                        current_shot_id = shot_accumulator.get('SHOT_ID')
-                        has_speed = 'SPEED_MPH' in shot_accumulator
-                        has_total_spin = 'SPIN_RPM' in shot_accumulator
-                        has_back_spin = 'BACK_RPM' in shot_accumulator
-                        has_side_spin = 'SIDE_RPM' in shot_accumulator
+                        # Check if message is complete (ends with \n\t)
+                        # GC2 messages terminate with \n\t as the final delimiter
+                        message_complete = text.endswith('\n\t') or text.endswith('\t')
 
-                        # Process shot when we have complete data
-                        # We need at least SHOT_ID, SPEED_MPH, SPIN_RPM, and preferably spin components
-                        if current_shot_id and has_speed and has_total_spin:
-                            shot_id_int = int(float(current_shot_id))
+                        if message_complete:
+                            # Check if we have shot data to process
+                            current_shot_id = shot_accumulator.get('SHOT_ID')
+                            has_speed = 'SPEED_MPH' in shot_accumulator
+                            has_total_spin = 'SPIN_RPM' in shot_accumulator
 
-                            # Check if this is a new shot (different ID from last processed)
-                            if shot_id_int != self.last_shot_id:
-                                # Wait for spin components if we don't have them yet
-                                has_spin_components = has_back_spin or has_side_spin
-                                spin_wait_count += 1
+                            if current_shot_id and has_speed and has_total_spin:
+                                shot_id_int = int(float(current_shot_id))
 
-                                # Process if we have spin components OR we've waited long enough
-                                if has_spin_components or spin_wait_count >= MAX_SPIN_WAIT:
-                                    if not has_spin_components:
-                                        logger.warning("Timeout waiting for spin components, processing anyway")
-
+                                # Check if this is a new shot (different ID from last processed)
+                                if shot_id_int != self.last_shot_id:
                                     logger.info(f"Complete shot data: {shot_accumulator}")
 
                                     shot = GC2ShotData.from_gc2_dict(shot_accumulator)
@@ -485,17 +475,13 @@ class GC2USBReader:
                                         logger.info(f"Shot #{shot.shot_id}: {shot.ball_speed:.1f} mph, "
                                                    f"{spin_info}, launch={shot.launch_angle:.1f}°")
                                         self._notify_shot(shot)
-                                        # Clear accumulator for next shot
-                                        shot_accumulator.clear()
-                                        spin_wait_count = 0
+
                                     else:
                                         logger.warning(f"Invalid shot data rejected: {shot_accumulator}")
-                                        shot_accumulator.clear()
-                                        spin_wait_count = 0
-                                else:
-                                    # Still waiting for spin components
-                                    if spin_wait_count == 1:
-                                        logger.debug(f"Waiting for spin components... have: {list(shot_accumulator.keys())}")
+
+                                    # Clear accumulator for next shot
+                                    shot_accumulator.clear()
+                                    line_buffer = ""  # Also clear line buffer
 
                     except usb.core.USBTimeoutError:
                         # No more data on this endpoint - move to next endpoint

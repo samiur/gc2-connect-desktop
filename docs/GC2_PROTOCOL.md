@@ -32,6 +32,7 @@ The GC2 exposes multiple USB endpoints:
 - Packet size: 64 bytes (data split across multiple packets)
 - Line separator: Newline (`\n`)
 - Field format: `KEY=VALUE`
+- **Message terminator**: `\n\t` (newline followed by tab) indicates end of a complete message
 
 ## Shot Data Fields
 
@@ -327,10 +328,10 @@ Real-time ball position updates during flight through the camera's field of view
 Shot data is split across multiple USB packets. The recommended approach (based on gc2_to_TGC implementation):
 
 1. **Filter by message type**: Only process `0H` messages, skip `0M` messages
-2. **Accumulate fields**: Parse key=value pairs into a dictionary, accumulating across packets
-3. **Wait for complete data**: Don't process until `BACK_RPM` or `SIDE_RPM` is received
-4. **Detect new shots**: When `SHOT_ID` changes, clear the accumulator and start fresh
-5. **Handle timeouts**: If spin components never arrive (~500ms), process with available data
+2. **Buffer partial lines**: Lines can be split across packets (e.g., `SPEED_MPH=7.8` + `5\n`), so buffer incomplete lines until a newline arrives
+3. **Accumulate fields**: Parse key=value pairs into a dictionary, accumulating across packets
+4. **Wait for message terminator**: Process when `\n\t` is received, indicating the complete message
+5. **Detect new shots**: When `SHOT_ID` changes, clear the accumulator and start fresh
 
 Example packet sequence for one shot:
 ```
