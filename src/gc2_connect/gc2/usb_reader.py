@@ -448,6 +448,22 @@ class GC2USBReader:
                             )
                             continue
 
+                        # Check if this is a new shot ID - if so, clear stale data
+                        if '0H' in text and 'SHOT_ID' in text:
+                            # Extract the new shot ID from the text
+                            for line in text.split('\n'):
+                                if 'SHOT_ID=' in line:
+                                    new_id = line.split('=')[1].strip()
+                                    old_id = shot_accumulator.get('SHOT_ID')
+                                    if old_id and old_id != new_id:
+                                        logger.warning(
+                                            f"Incomplete shot #{old_id} discarded "
+                                            f"(had: {list(shot_accumulator.keys())})"
+                                        )
+                                        shot_accumulator.clear()
+                                        line_buffer = ""
+                                    break
+
                         shot_accumulator, line_buffer = self._parse_gc2_fields(
                             text, shot_accumulator, line_buffer
                         )
