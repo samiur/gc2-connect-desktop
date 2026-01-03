@@ -24,7 +24,7 @@ class TestSettingsDefaults:
     def test_settings_has_version(self) -> None:
         """Test that settings has a version field."""
         settings = Settings()
-        assert settings.version == 1
+        assert settings.version == 2
 
     def test_gspro_default_host(self) -> None:
         """Test default GSPro host."""
@@ -178,7 +178,7 @@ class TestSettingsLoad:
         settings_path = tmp_path / "nonexistent" / "settings.json"
         with patch("gc2_connect.config.settings.get_settings_path", return_value=settings_path):
             settings = Settings.load()
-            assert settings.version == 1
+            assert settings.version == 2
             assert settings.gspro.host == "127.0.0.1"
             assert settings.gc2.auto_connect is True
 
@@ -211,7 +211,7 @@ class TestSettingsLoad:
         with patch("gc2_connect.config.settings.get_settings_path", return_value=settings_path):
             settings = Settings.load()
             # Should return defaults
-            assert settings.version == 1
+            assert settings.version == 2
             assert settings.gspro.host == "127.0.0.1"
 
     def test_load_handles_partial_data(self, tmp_path: Path) -> None:
@@ -263,7 +263,7 @@ class TestSettingsSave:
 
         assert settings_path.exists()
         data = json.loads(settings_path.read_text())
-        assert data["version"] == 1
+        assert data["version"] == 2
         assert data["gspro"]["host"] == "127.0.0.1"
 
     def test_save_creates_parent_directories(self, tmp_path: Path) -> None:
@@ -377,7 +377,7 @@ class TestSettingsToDict:
         )
         result = settings.to_dict()
 
-        assert result["version"] == 1
+        assert result["version"] == 2
         assert result["gspro"]["host"] == "test.host"
         assert result["gspro"]["port"] == 1000
         assert result["gc2"]["use_mock"] is True
