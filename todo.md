@@ -146,3 +146,8 @@ uv run python tools/mock_gspro_server.py
 
 - **0M Message Handling (2026-01-02)**: Added parsing of 0M messages for ball status. FLAGS=7 means ready (green light), BALLS>0 means ball detected. Status sent to GSPro via `LaunchMonitorIsReady` and `LaunchMonitorBallDetected` flags.
 - **Shot Validation (2026-01-02)**: Updated validation to match gc2_to_TGC: reject only when back_spin=0 AND side_spin=0 (not just total_spin=0). Also reject back_spin=2222 error code. Allow any positive ball speed (chip shots are valid).
+- **GSPro Socket Configuration (2026-01-03)**: Must use `TCP_NODELAY` socket option for immediate sends. Use `socket.create_connection()` for cleaner handling.
+- **GSPro Response Handling (2026-01-03)**: GSPro doesn't respond to heartbeat or status messages - don't wait for response. Only wait for response on shot data. Clear buffer before sending to handle concatenated responses.
+- **GSPro Buffer Management (2026-01-03)**: Use `json.JSONDecoder.raw_decode()` to parse only first JSON object (handles concatenated responses from buffered messages).
+- **Ball Speed Units (2026-01-03)**: GSPro expects ball speed in mph (not m/s). The debug window may show wrong values but actual game uses mph correctly.
+- **Shutdown Handling (2026-01-03)**: Added proper shutdown handlers to disconnect GSPro and GC2 cleanly. Uses NiceGUI `app.on_shutdown()`, signal handlers (SIGINT, SIGTERM), and atexit fallback.

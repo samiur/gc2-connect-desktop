@@ -25,10 +25,13 @@ This is a Python desktop application for Mac and Linux that reads shot data from
 - See `docs/GC2_PROTOCOL.md` for full specification
 
 ### GSPro Integration
-- Protocol: TCP socket, JSON messages
+- Protocol: TCP socket, JSON messages (no newline delimiter)
 - Default port: 921
 - API: GSPro Open Connect API v1
-- Messages are newline-delimited JSON
+- **Critical**: Set `TCP_NODELAY` socket option for immediate sends
+- **Critical**: Don't wait for responses to heartbeat/status messages (GSPro doesn't respond)
+- **Critical**: Clear buffer before sending, parse only first JSON object (handles concatenated responses)
+- See `docs/GSPRO_CONNECT.md` for complete implementation guide
 
 ## Directory Structure
 
@@ -90,13 +93,17 @@ uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
 3. **Shot Validation**: Zero spin (back_spin=0 AND side_spin=0) and 2222 backspin are misreads - reject them
 4. **Reconnection**: Both USB and network should auto-reconnect
 5. **Ball Status**: GC2 sends 0M messages with FLAGS (1=red light, 7=green light) and BALLS count for UI indicators
+6. **Shutdown Handling**: App has proper shutdown handlers for GSPro/GC2 disconnection (signal handlers, atexit, NiceGUI on_shutdown)
 
 ## Related Documentation
 
 - `docs/PRD.md` - Product requirements
-- `docs/TRD.md` - Technical requirements  
+- `docs/TRD.md` - Technical requirements
 - `docs/GC2_PROTOCOL.md` - USB protocol specification
+- `docs/GSPRO_CONNECT.md` - GSPro Open Connect API implementation guide
 - `README.md` - User documentation
+- `plan.md` - Implementation prompts and roadmap
+- `todo.md` - Current implementation status
 
 ## Code Style
 

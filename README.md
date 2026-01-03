@@ -148,10 +148,11 @@ gc2-connect-desktop/
 
 ### GSPro Connection Failed
 
-1. Verify GSPro is running with Open Connect API enabled
-2. Check firewall settings on the Windows PC
-3. Ensure both devices are on the same network
-4. Try pinging the Windows PC from your Mac/Linux machine
+1. Verify GSPro is running with **Open Connect API v1** enabled (not v2)
+2. Check that GSPro shows "Waiting for LM to connect" status
+3. Check firewall settings on the Windows PC (port 921 must be open)
+4. Ensure both devices are on the same network
+5. Try pinging the Windows PC from your Mac/Linux machine
 
 ### No Shot Data
 
@@ -178,7 +179,14 @@ uv run mypy src/
 uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
 ```
 
-See `plan.md` for the implementation roadmap and `todo.md` for current progress.
+## Documentation
+
+- `plan.md` - Implementation roadmap with prompts
+- `todo.md` - Current implementation progress
+- `docs/GC2_PROTOCOL.md` - GC2 USB protocol specification
+- `docs/GSPRO_CONNECT.md` - GSPro Open Connect API implementation guide
+- `docs/PRD.md` - Product requirements
+- `docs/TRD.md` - Technical requirements
 
 ## License
 

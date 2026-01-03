@@ -426,9 +426,37 @@ The gc2_to_TGC application uses these internal field names in its callback (mapp
 | `face_to_target` | `FACE_T_DEG` | Face angle to target (HMT) |
 | `horizontal_impact_location` | `HIMPACT_MM` | Sweet spot location (HMT) |
 
+## GSPro Unit Conversions
+
+When sending data to GSPro via the Open Connect API v1:
+
+### Ball Speed
+
+GSPro expects ball speed in **mph** (miles per hour) - no conversion needed:
+
+```python
+# GC2 sends speed in mph, GSPro expects mph
+ball_speed_mph = 135.55  # Send directly to GSPro
+```
+
+**Note:** The GSPro Open Connect debug window may display incorrect values (showing a conversion that shouldn't be applied), but the actual game/simulator uses the value correctly.
+
+### All Fields
+
+All fields are sent without unit conversion:
+
+| Field | GC2 Unit | GSPro Unit | Conversion |
+|-------|----------|------------|------------|
+| Ball Speed | mph | mph | None |
+| Club Speed | mph | mph | None |
+| Launch Angle | degrees | degrees | None |
+| Spin | rpm | rpm | None |
+| Spin Axis | degrees | degrees | None |
+
 ## References
 
 - USB 2.0 Specification
 - Foresight Sports GC2 User Manual
 - GSPro Open Connect API v1 Documentation
 - gc2_to_TGC application (reverse engineered for protocol details)
+- `GSPRO_CONNECT.md` - GSPro Open Connect API implementation guide
