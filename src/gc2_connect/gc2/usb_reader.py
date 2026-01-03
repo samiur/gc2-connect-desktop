@@ -401,102 +401,109 @@ class GC2USBReader:
         while self._running:
             # Try reading from all endpoints
             for ep_name, ep in endpoints_to_try:
-                try:
-                    # Read from USB endpoint (run in thread pool to avoid blocking)
-                    data = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        lambda ep=ep: self.dev.read(
-                            ep.bEndpointAddress,
-                            ep.wMaxPacketSize,
-                            timeout=100  # Short timeout to check multiple endpoints
+                # Drain all available packets from this endpoint before moving on
+                # This prevents missing rapidly-arriving packets
+                packets_read = 0
+                while True:
+                    try:
+                        # Read from USB endpoint (run in thread pool to avoid blocking)
+                        data = await asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda ep=ep: self.dev.read(
+                                ep.bEndpointAddress,
+                                ep.wMaxPacketSize,
+                                timeout=50  # Shorter timeout to drain buffer quickly
+                            )
                         )
-                    )
 
-                    timeout_count = 0
+                        packets_read += 1
+                        timeout_count = 0
 
-                    # Convert to string
-                    text = ''.join(chr(x) for x in data if x != 0)
+                        # Convert to string
+                        text = ''.join(chr(x) for x in data if x != 0)
 
-                    # Log ALL received data for debugging
-                    # Shot-relevant packets at INFO, others at DEBUG
-                    is_shot_data = 'SHOT_ID' in text or 'SPIN_RPM' in text or 'BACK_RPM' in text or 'SIDE_RPM' in text
-                    is_tracking = '0M' in text
+                        # Log ALL received data for debugging
+                        # Shot-relevant packets at INFO, others at DEBUG
+                        is_shot_data = 'SHOT_ID' in text or 'SPIN_RPM' in text or 'BACK_RPM' in text or 'SIDE_RPM' in text
+                        is_tracking = '0M' in text
 
-                    if is_shot_data:
-                        logger.info(f"USB RX [{ep_name}] ({len(data)} bytes): {text!r}")
-                    elif is_tracking:
-                        logger.debug(f"USB RX [{ep_name}] 0M tracking: {text!r}")
-                    else:
-                        # Log ALL other packets so we can see what's being received
-                        logger.info(f"USB RX [{ep_name}] ({len(data)} bytes) OTHER: {text!r}")
+                        if is_shot_data:
+                            logger.info(f"USB RX [{ep_name}] ({len(data)} bytes): {text!r}")
+                        elif is_tracking:
+                            logger.debug(f"USB RX [{ep_name}] 0M tracking: {text!r}")
+                        else:
+                            # Log ALL other packets so we can see what's being received
+                            logger.info(f"USB RX [{ep_name}] ({len(data)} bytes) OTHER: {text!r}")
 
-                    # Always update line buffer to handle values split across packets
-                    # But only accumulate fields from 0H (shot data) messages
-                    if '0M' in text:
-                        # For 0M messages, just update line buffer, don't accumulate
-                        # This handles cases where 0M appears mid-stream
-                        _, line_buffer = self._parse_gc2_fields(
-                            text, {}, line_buffer
+                        # Always update line buffer to handle values split across packets
+                        # But only accumulate fields from 0H (shot data) messages
+                        if '0M' in text:
+                            # For 0M messages, just update line buffer, don't accumulate
+                            # This handles cases where 0M appears mid-stream
+                            _, line_buffer = self._parse_gc2_fields(
+                                text, {}, line_buffer
+                            )
+                            continue
+
+                        shot_accumulator, line_buffer = self._parse_gc2_fields(
+                            text, shot_accumulator, line_buffer
                         )
-                        continue
 
-                    shot_accumulator, line_buffer = self._parse_gc2_fields(
-                        text, shot_accumulator, line_buffer
-                    )
+                        # Check if we have a new shot ready to process
+                        current_shot_id = shot_accumulator.get('SHOT_ID')
+                        has_speed = 'SPEED_MPH' in shot_accumulator
+                        has_total_spin = 'SPIN_RPM' in shot_accumulator
+                        has_back_spin = 'BACK_RPM' in shot_accumulator
+                        has_side_spin = 'SIDE_RPM' in shot_accumulator
 
-                    # Check if we have a new shot ready to process
-                    current_shot_id = shot_accumulator.get('SHOT_ID')
-                    has_speed = 'SPEED_MPH' in shot_accumulator
-                    has_total_spin = 'SPIN_RPM' in shot_accumulator
-                    has_back_spin = 'BACK_RPM' in shot_accumulator
-                    has_side_spin = 'SIDE_RPM' in shot_accumulator
+                        # Process shot when we have complete data
+                        # We need at least SHOT_ID, SPEED_MPH, SPIN_RPM, and preferably spin components
+                        if current_shot_id and has_speed and has_total_spin:
+                            shot_id_int = int(float(current_shot_id))
 
-                    # Process shot when we have complete data
-                    # We need at least SHOT_ID, SPEED_MPH, SPIN_RPM, and preferably spin components
-                    if current_shot_id and has_speed and has_total_spin:
-                        shot_id_int = int(float(current_shot_id))
+                            # Check if this is a new shot (different ID from last processed)
+                            if shot_id_int != self.last_shot_id:
+                                # Wait for spin components if we don't have them yet
+                                has_spin_components = has_back_spin or has_side_spin
+                                spin_wait_count += 1
 
-                        # Check if this is a new shot (different ID from last processed)
-                        if shot_id_int != self.last_shot_id:
-                            # Wait for spin components if we don't have them yet
-                            has_spin_components = has_back_spin or has_side_spin
-                            spin_wait_count += 1
+                                # Process if we have spin components OR we've waited long enough
+                                if has_spin_components or spin_wait_count >= MAX_SPIN_WAIT:
+                                    if not has_spin_components:
+                                        logger.warning("Timeout waiting for spin components, processing anyway")
 
-                            # Process if we have spin components OR we've waited long enough
-                            if has_spin_components or spin_wait_count >= MAX_SPIN_WAIT:
-                                if not has_spin_components:
-                                    logger.warning("Timeout waiting for spin components, processing anyway")
+                                    logger.info(f"Complete shot data: {shot_accumulator}")
 
-                                logger.info(f"Complete shot data: {shot_accumulator}")
-
-                                shot = GC2ShotData.from_gc2_dict(shot_accumulator)
-                                if shot.is_valid():
-                                    self.last_shot_id = shot_id_int
-                                    spin_info = f"spin={shot.total_spin:.0f}"
-                                    if shot.back_spin or shot.side_spin:
-                                        spin_info += f" (back={shot.back_spin:.0f}, side={shot.side_spin:.0f}, axis={shot.spin_axis:.1f}°)"
+                                    shot = GC2ShotData.from_gc2_dict(shot_accumulator)
+                                    if shot.is_valid():
+                                        self.last_shot_id = shot_id_int
+                                        spin_info = f"spin={shot.total_spin:.0f}"
+                                        if shot.back_spin or shot.side_spin:
+                                            spin_info += f" (back={shot.back_spin:.0f}, side={shot.side_spin:.0f}, axis={shot.spin_axis:.1f}°)"
+                                        else:
+                                            spin_info += " (no spin components from device)"
+                                        logger.info(f"Shot #{shot.shot_id}: {shot.ball_speed:.1f} mph, "
+                                                   f"{spin_info}, launch={shot.launch_angle:.1f}°")
+                                        self._notify_shot(shot)
+                                        # Clear accumulator for next shot
+                                        shot_accumulator.clear()
+                                        spin_wait_count = 0
                                     else:
-                                        spin_info += " (no spin components from device)"
-                                    logger.info(f"Shot #{shot.shot_id}: {shot.ball_speed:.1f} mph, "
-                                               f"{spin_info}, launch={shot.launch_angle:.1f}°")
-                                    self._notify_shot(shot)
-                                    # Clear accumulator for next shot
-                                    shot_accumulator.clear()
-                                    spin_wait_count = 0
+                                        logger.warning(f"Invalid shot data rejected: {shot_accumulator}")
+                                        shot_accumulator.clear()
+                                        spin_wait_count = 0
                                 else:
-                                    logger.warning(f"Invalid shot data rejected: {shot_accumulator}")
-                                    shot_accumulator.clear()
-                                    spin_wait_count = 0
-                            else:
-                                # Still waiting for spin components
-                                if spin_wait_count == 1:
-                                    logger.debug(f"Waiting for spin components... have: {list(shot_accumulator.keys())}")
+                                    # Still waiting for spin components
+                                    if spin_wait_count == 1:
+                                        logger.debug(f"Waiting for spin components... have: {list(shot_accumulator.keys())}")
 
-                except usb.core.USBTimeoutError:
-                    pass  # Normal - no data on this endpoint
-                except usb.core.USBError as e:
-                    if "timeout" not in str(e).lower():
-                        logger.error(f"USB read error on {ep_name}: {e}")
+                    except usb.core.USBTimeoutError:
+                        # No more data on this endpoint - move to next endpoint
+                        break
+                    except usb.core.USBError as e:
+                        if "timeout" not in str(e).lower():
+                            logger.error(f"USB read error on {ep_name}: {e}")
+                        break
 
             # Count timeouts for logging
             timeout_count += 1
