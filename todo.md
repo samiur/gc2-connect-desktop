@@ -55,14 +55,14 @@ Target Release: v1.1.0 (with Open Range)
 
 ---
 
-## Phase 3: Reliability & Error Handling
+## Phase 3: Reliability & Error Handling ✅
 
-- [ ] **Prompt 8**: Auto-Reconnection Logic
-  - [ ] Write tests for reconnection
-  - [ ] Create ReconnectionManager
-  - [ ] Integrate with GC2 reader
-  - [ ] Integrate with GSPro client
-  - [ ] Update UI for status
+- [x] **Prompt 8**: Auto-Reconnection Logic
+  - [x] Write tests for reconnection
+  - [x] Create ReconnectionManager
+  - [x] Integrate with GC2 reader
+  - [x] Integrate with GSPro client
+  - [x] Update UI for status
 
 ---
 
@@ -237,6 +237,7 @@ uv run python tools/mock_gspro_server.py
 - **Shutdown Handling (2026-01-03)**: Added proper shutdown handlers to disconnect GSPro and GC2 cleanly. Uses NiceGUI `app.on_shutdown()`, signal handlers (SIGINT, SIGTERM), and atexit fallback.
 - **Open Range Physics (2026-01-03)**: Using Nathan model + WSU aerodynamics. Cd uses piecewise linear with spin term. Cl uses quadratic formula (not table lookup). Validated against libgolf reference implementation.
 - **Open Range Visualization (2026-01-03)**: Using NiceGUI's Three.js integration (ui.scene). Ball animation follows trajectory points with phase indicators.
+- **Auto-Reconnection (2026-01-03)**: ReconnectionManager uses exponential backoff (1s, 2s, 4s, 8s, 16s). GC2 USB disconnects detected via error messages (no device, io error, etc). GSPro disconnects detected via socket errors. UI shows yellow "Reconnecting..." status during attempts.
 
 ### Architecture Decisions
 
