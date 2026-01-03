@@ -26,6 +26,17 @@ logger = logging.getLogger(__name__)
 GC2_VENDOR_ID = 0x2C79
 GC2_PRODUCT_ID = 0x0110
 
+# USB errors that indicate disconnection
+USB_DISCONNECT_ERRORS = (
+    "no device",
+    "device not found",
+    "entity not found",
+    "no such device",
+    "io error",
+    "pipe error",
+    "resource busy",
+)
+
 
 class GC2USBReader:
     """Handles USB communication with the GC2 launch monitor."""
@@ -40,6 +51,7 @@ class GC2USBReader:
         self._connected = False
         self._callbacks: list[Callable[[GC2ShotData], None]] = []
         self._status_callbacks: list[Callable[[GC2BallStatus], None]] = []
+        self._disconnect_callbacks: list[Callable[[], None]] = []
         self._last_status: GC2BallStatus | None = None
 
     @property
@@ -73,6 +85,15 @@ class GC2USBReader:
         if callback in self._status_callbacks:
             self._status_callbacks.remove(callback)
 
+    def add_disconnect_callback(self, callback: Callable[[], None]) -> None:
+        """Add a callback to be called when USB connection is lost."""
+        self._disconnect_callbacks.append(callback)
+
+    def remove_disconnect_callback(self, callback: Callable[[], None]) -> None:
+        """Remove a disconnect callback."""
+        if callback in self._disconnect_callbacks:
+            self._disconnect_callbacks.remove(callback)
+
     def _notify_shot(self, shot: GC2ShotData) -> None:
         """Notify all callbacks of a new shot."""
         for callback in self._callbacks:
@@ -88,6 +109,19 @@ class GC2USBReader:
                 callback(status)
             except Exception as e:
                 logger.error(f"Status callback error: {e}")
+
+    def _notify_disconnect(self) -> None:
+        """Notify all callbacks of a disconnection."""
+        for callback in self._disconnect_callbacks:
+            try:
+                callback()
+            except Exception as e:
+                logger.error(f"Disconnect callback error: {e}")
+
+    def _is_disconnect_error(self, error: Exception) -> bool:
+        """Check if a USB error indicates disconnection."""
+        error_str = str(error).lower()
+        return any(msg in error_str for msg in USB_DISCONNECT_ERRORS)
 
     def find_device(self) -> bool:
         """Find the GC2 USB device."""
@@ -596,6 +630,13 @@ class GC2USBReader:
                     except usb.core.USBError as e:
                         if "timeout" not in str(e).lower():
                             logger.error(f"USB read error on {ep_name}: {e}")
+                            # Check if this indicates a disconnection
+                            if self._is_disconnect_error(e):
+                                logger.error("GC2 USB disconnection detected!")
+                                self._connected = False
+                                self._running = False
+                                self._notify_disconnect()
+                                return  # Exit the read loop
                         break
 
             # Count timeouts for logging
@@ -651,6 +692,7 @@ class MockGC2Reader:
         self._running = False
         self._callbacks: list[Callable[[GC2ShotData], None]] = []
         self._status_callbacks: list[Callable[[GC2BallStatus], None]] = []
+        self._disconnect_callbacks: list[Callable[[], None]] = []
         self._shot_number = 0
         self._last_status: GC2BallStatus | None = None
 
@@ -679,6 +721,15 @@ class MockGC2Reader:
     def remove_status_callback(self, callback: Callable[[GC2BallStatus], None]) -> None:
         if callback in self._status_callbacks:
             self._status_callbacks.remove(callback)
+
+    def add_disconnect_callback(self, callback: Callable[[], None]) -> None:
+        """Add a callback to be called when connection is lost."""
+        self._disconnect_callbacks.append(callback)
+
+    def remove_disconnect_callback(self, callback: Callable[[], None]) -> None:
+        """Remove a disconnect callback."""
+        if callback in self._disconnect_callbacks:
+            self._disconnect_callbacks.remove(callback)
 
     def connect(self) -> bool:
         self._connected = True

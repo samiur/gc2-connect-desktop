@@ -36,6 +36,7 @@ class GSProClient:
         self._shot_number = 0
         self._current_player: dict[str, Any] | None = None
         self._response_callbacks: list[Callable[[GSProResponse], None]] = []
+        self._disconnect_callbacks: list[Callable[[], None]] = []
 
     @property
     def is_connected(self) -> bool:
@@ -64,6 +65,23 @@ class GSProClient:
                 callback(response)
             except Exception as e:
                 logger.error(f"Response callback error: {e}")
+
+    def add_disconnect_callback(self, callback: Callable[[], None]) -> None:
+        """Add a callback for connection loss events."""
+        self._disconnect_callbacks.append(callback)
+
+    def remove_disconnect_callback(self, callback: Callable[[], None]) -> None:
+        """Remove a disconnect callback."""
+        if callback in self._disconnect_callbacks:
+            self._disconnect_callbacks.remove(callback)
+
+    def _notify_disconnect(self) -> None:
+        """Notify all callbacks of a disconnection."""
+        for callback in self._disconnect_callbacks:
+            try:
+                callback()
+            except Exception as e:
+                logger.error(f"Disconnect callback error: {e}")
 
     def connect(self) -> bool:
         """Connect to GSPro."""
@@ -239,7 +257,11 @@ class GSProClient:
             return None
         except OSError as e:
             logger.error(f"Socket error: {e}")
+            was_connected = self._connected
             self._connected = False
+            if was_connected:
+                logger.error("GSPro connection lost!")
+                self._notify_disconnect()
             return None
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON response: {e}")

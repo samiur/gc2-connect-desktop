@@ -18,6 +18,7 @@ from gc2_connect.config.settings import Settings, get_settings_path
 from gc2_connect.gc2.usb_reader import GC2USBReader, MockGC2Reader
 from gc2_connect.gspro.client import GSProClient
 from gc2_connect.models import GC2BallStatus, GC2ShotData
+from gc2_connect.utils.reconnect import ReconnectionManager, ReconnectionState
 
 # Configure logging (set GC2_DEBUG=1 for verbose USB debugging)
 log_level = logging.DEBUG if os.environ.get("GC2_DEBUG") else logging.INFO
@@ -56,8 +57,15 @@ class GC2ConnectApp:
         # Ball status state
         self.send_status_to_gspro = True
 
+        # Reconnection managers
+        self._gc2_reconnect_mgr = ReconnectionManager(max_retries=5, base_delay=1.0)
+        self._gspro_reconnect_mgr = ReconnectionManager(max_retries=5, base_delay=1.0)
+        self._setup_reconnection_callbacks()
+
         # Tasks
         self._gc2_task: asyncio.Task[None] | None = None
+        self._gc2_reconnect_task: asyncio.Task[None] | None = None
+        self._gspro_reconnect_task: asyncio.Task[None] | None = None
 
     def save_settings(self) -> None:
         """Save current settings to file."""
@@ -67,6 +75,170 @@ class GC2ConnectApp:
         except Exception as e:
             logger.error(f"Failed to save settings: {e}")
             ui.notify(f"Failed to save settings: {e}", type="negative")
+
+    def _setup_reconnection_callbacks(self) -> None:
+        """Set up callbacks for reconnection managers."""
+        # GC2 reconnection state changes
+        self._gc2_reconnect_mgr.on_state_change(self._on_gc2_reconnect_state_change)
+        self._gc2_reconnect_mgr.on_attempt(self._on_gc2_reconnect_attempt)
+
+        # GSPro reconnection state changes
+        self._gspro_reconnect_mgr.on_state_change(self._on_gspro_reconnect_state_change)
+        self._gspro_reconnect_mgr.on_attempt(self._on_gspro_reconnect_attempt)
+
+    def _on_gc2_reconnect_state_change(self, state: ReconnectionState) -> None:
+        """Handle GC2 reconnection state changes."""
+        if self.gc2_status_label is None:
+            return
+
+        if state == ReconnectionState.RECONNECTING:
+            self.gc2_status_label.text = "Reconnecting..."
+            self.gc2_status_label.classes(
+                remove="text-red-500 text-green-500", add="text-yellow-500"
+            )
+        elif state == ReconnectionState.CONNECTED:
+            self.gc2_status_label.text = "Connected"
+            self.gc2_status_label.classes(
+                remove="text-red-500 text-yellow-500", add="text-green-500"
+            )
+            ui.notify("GC2 Reconnected!", type="positive")
+        elif state == ReconnectionState.FAILED:
+            self.gc2_status_label.text = "Reconnection Failed"
+            self.gc2_status_label.classes(
+                remove="text-green-500 text-yellow-500", add="text-red-500"
+            )
+            ui.notify("GC2 reconnection failed after max retries", type="negative")
+        elif state == ReconnectionState.DISCONNECTED:
+            self.gc2_status_label.text = "Disconnected"
+            self.gc2_status_label.classes(
+                remove="text-green-500 text-yellow-500", add="text-red-500"
+            )
+
+    def _on_gc2_reconnect_attempt(self, attempt: int, delay: float) -> None:
+        """Handle GC2 reconnection attempt notification."""
+        if self.gc2_status_label is None:
+            return
+
+        self.gc2_status_label.text = f"Reconnecting... ({attempt}/5, {delay:.0f}s)"
+        ui.notify(f"GC2 reconnecting in {delay:.0f}s (attempt {attempt})", type="info")
+
+    def _on_gspro_reconnect_state_change(self, state: ReconnectionState) -> None:
+        """Handle GSPro reconnection state changes."""
+        if self.gspro_status_label is None:
+            return
+
+        if state == ReconnectionState.RECONNECTING:
+            self.gspro_status_label.text = "Reconnecting..."
+            self.gspro_status_label.classes(
+                remove="text-red-500 text-green-500", add="text-yellow-500"
+            )
+        elif state == ReconnectionState.CONNECTED:
+            host = self.gspro_host_input.value if self.gspro_host_input else "GSPro"
+            port = self.gspro_port_input.value if self.gspro_port_input else "921"
+            self.gspro_status_label.text = f"Connected to {host}:{port}"
+            self.gspro_status_label.classes(
+                remove="text-red-500 text-yellow-500", add="text-green-500"
+            )
+            ui.notify("GSPro Reconnected!", type="positive")
+        elif state == ReconnectionState.FAILED:
+            self.gspro_status_label.text = "Reconnection Failed"
+            self.gspro_status_label.classes(
+                remove="text-green-500 text-yellow-500", add="text-red-500"
+            )
+            ui.notify("GSPro reconnection failed after max retries", type="negative")
+        elif state == ReconnectionState.DISCONNECTED:
+            self.gspro_status_label.text = "Disconnected"
+            self.gspro_status_label.classes(
+                remove="text-green-500 text-yellow-500", add="text-red-500"
+            )
+
+    def _on_gspro_reconnect_attempt(self, attempt: int, delay: float) -> None:
+        """Handle GSPro reconnection attempt notification."""
+        if self.gspro_status_label is None:
+            return
+
+        self.gspro_status_label.text = f"Reconnecting... ({attempt}/5, {delay:.0f}s)"
+        ui.notify(f"GSPro reconnecting in {delay:.0f}s (attempt {attempt})", type="info")
+
+    def _on_gc2_disconnect(self) -> None:
+        """Handle GC2 disconnect event - trigger reconnection."""
+        logger.warning("GC2 disconnected - starting auto-reconnection")
+
+        if self.gc2_status_label:
+            self.gc2_status_label.text = "Connection Lost"
+            self.gc2_status_label.classes(remove="text-green-500", add="text-red-500")
+
+        ui.notify("GC2 connection lost - attempting to reconnect...", type="warning")
+
+        # Start reconnection in background
+        self._gc2_reconnect_task = asyncio.create_task(self._reconnect_gc2())
+
+    def _on_gspro_disconnect(self) -> None:
+        """Handle GSPro disconnect event - trigger reconnection."""
+        logger.warning("GSPro disconnected - starting auto-reconnection")
+
+        if self.gspro_status_label:
+            self.gspro_status_label.text = "Connection Lost"
+            self.gspro_status_label.classes(remove="text-green-500", add="text-red-500")
+
+        ui.notify("GSPro connection lost - attempting to reconnect...", type="warning")
+
+        # Start reconnection in background
+        self._gspro_reconnect_task = asyncio.create_task(self._reconnect_gspro())
+
+    async def _reconnect_gc2(self) -> None:
+        """Attempt to reconnect to GC2."""
+        # Clean up existing reader
+        if self._gc2_task:
+            self._gc2_task.cancel()
+            self._gc2_task = None
+
+        if self.gc2_reader:
+            try:
+                self.gc2_reader.disconnect()
+            except Exception:
+                pass
+            self.gc2_reader = None
+
+        # Create new reader
+        if self.use_mock_gc2:
+            self.gc2_reader = MockGC2Reader()
+        else:
+            self.gc2_reader = GC2USBReader()
+
+        self.gc2_reader.add_shot_callback(self._on_shot_received)
+        self.gc2_reader.add_status_callback(self._on_status_received)
+        self.gc2_reader.add_disconnect_callback(self._on_gc2_disconnect)
+
+        # Attempt reconnection
+        success = await self._gc2_reconnect_mgr.attempt_reconnect(self.gc2_reader.connect)
+
+        if success:
+            # Start read loop
+            self._gc2_task = asyncio.create_task(self.gc2_reader.read_loop())
+
+    async def _reconnect_gspro(self) -> None:
+        """Attempt to reconnect to GSPro."""
+        # Clean up existing client
+        if self.gspro_client:
+            try:
+                self.gspro_client.disconnect()
+            except Exception:
+                pass
+            self.gspro_client = None
+
+        # Get connection parameters
+        host = self.gspro_host_input.value if self.gspro_host_input else self.settings.gspro.host
+        port = (
+            int(self.gspro_port_input.value) if self.gspro_port_input else self.settings.gspro.port
+        )
+
+        # Create new client
+        self.gspro_client = GSProClient(host=host, port=port)
+        self.gspro_client.add_disconnect_callback(self._on_gspro_disconnect)
+
+        # Attempt reconnection
+        await self._gspro_reconnect_mgr.attempt_reconnect(self.gspro_client.connect)
 
     def get_settings_path(self) -> Path:
         """Get the path to the settings file."""
@@ -352,6 +524,9 @@ class GC2ConnectApp:
 
     async def _connect_gc2(self) -> None:
         """Connect to the GC2."""
+        # Reset reconnection state
+        self._gc2_reconnect_mgr.reset()
+
         if self.use_mock_gc2:
             self.gc2_reader = MockGC2Reader()
         else:
@@ -359,10 +534,13 @@ class GC2ConnectApp:
 
         self.gc2_reader.add_shot_callback(self._on_shot_received)
         self.gc2_reader.add_status_callback(self._on_status_received)
+        self.gc2_reader.add_disconnect_callback(self._on_gc2_disconnect)
 
         if self.gc2_reader.connect():
             self.gc2_status_label.text = "Connected"
-            self.gc2_status_label.classes(remove="text-red-500", add="text-green-500")
+            self.gc2_status_label.classes(
+                remove="text-red-500 text-yellow-500", add="text-green-500"
+            )
 
             # Start read loop
             self._gc2_task = asyncio.create_task(self.gc2_reader.read_loop())
@@ -373,6 +551,12 @@ class GC2ConnectApp:
 
     def _disconnect_gc2(self) -> None:
         """Disconnect from the GC2."""
+        # Cancel any pending reconnection
+        self._gc2_reconnect_mgr.cancel()
+        if self._gc2_reconnect_task:
+            self._gc2_reconnect_task.cancel()
+            self._gc2_reconnect_task = None
+
         if self._gc2_task:
             self._gc2_task.cancel()
             self._gc2_task = None
@@ -382,7 +566,7 @@ class GC2ConnectApp:
             self.gc2_reader = None
 
         self.gc2_status_label.text = "Disconnected"
-        self.gc2_status_label.classes(remove="text-green-500", add="text-red-500")
+        self.gc2_status_label.classes(remove="text-green-500 text-yellow-500", add="text-red-500")
 
         # Reset status indicators
         if self.gc2_ready_indicator:
@@ -396,14 +580,20 @@ class GC2ConnectApp:
 
     async def _connect_gspro(self) -> None:
         """Connect to GSPro."""
+        # Reset reconnection state
+        self._gspro_reconnect_mgr.reset()
+
         host = self.gspro_host_input.value
         port = int(self.gspro_port_input.value)
 
         self.gspro_client = GSProClient(host=host, port=port)
+        self.gspro_client.add_disconnect_callback(self._on_gspro_disconnect)
 
         if await self.gspro_client.connect_async():
             self.gspro_status_label.text = f"Connected to {host}:{port}"
-            self.gspro_status_label.classes(remove="text-red-500", add="text-green-500")
+            self.gspro_status_label.classes(
+                remove="text-red-500 text-yellow-500", add="text-green-500"
+            )
             ui.notify("GSPro Connected!", type="positive")
         else:
             self.gspro_status_label.text = "Connection Failed"
@@ -411,12 +601,18 @@ class GC2ConnectApp:
 
     def _disconnect_gspro(self) -> None:
         """Disconnect from GSPro."""
+        # Cancel any pending reconnection
+        self._gspro_reconnect_mgr.cancel()
+        if self._gspro_reconnect_task:
+            self._gspro_reconnect_task.cancel()
+            self._gspro_reconnect_task = None
+
         if self.gspro_client:
             self.gspro_client.disconnect()
             self.gspro_client = None
 
         self.gspro_status_label.text = "Disconnected"
-        self.gspro_status_label.classes(remove="text-green-500", add="text-red-500")
+        self.gspro_status_label.classes(remove="text-green-500 text-yellow-500", add="text-red-500")
         ui.notify("GSPro Disconnected", type="info")
 
     def _on_shot_received(self, shot: GC2ShotData) -> None:
@@ -475,7 +671,21 @@ class GC2ConnectApp:
         """
         logger.info("Shutting down GC2 Connect...")
 
-        # Cancel GC2 read task first
+        # Cancel reconnection managers and tasks first
+        self._gc2_reconnect_mgr.cancel()
+        self._gspro_reconnect_mgr.cancel()
+
+        if self._gc2_reconnect_task:
+            logger.debug("Cancelling GC2 reconnection task...")
+            self._gc2_reconnect_task.cancel()
+            self._gc2_reconnect_task = None
+
+        if self._gspro_reconnect_task:
+            logger.debug("Cancelling GSPro reconnection task...")
+            self._gspro_reconnect_task.cancel()
+            self._gspro_reconnect_task = None
+
+        # Cancel GC2 read task
         if self._gc2_task:
             logger.debug("Cancelling GC2 read task...")
             self._gc2_task.cancel()
