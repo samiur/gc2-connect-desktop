@@ -66,8 +66,20 @@ uv run python -m gc2_connect.main
 # Run tests
 uv run pytest
 
+# Run type checks
+uv run mypy src/
+
 # Run linting
 uv run ruff check .
+
+# Run format check
+uv run ruff format --check .
+
+# Auto-fix formatting
+uv run ruff format .
+
+# Run all CI checks locally (do this before creating PRs!)
+uv run pytest && uv run mypy src/ && uv run ruff check . && uv run ruff format --check .
 
 # Run mock GSPro server (for testing)
 uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
@@ -83,8 +95,11 @@ uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
 ## Workflow
 
 - If a `todo.md` exists, check off completed work
-- **Tests must pass** before any task is considered done
-- **Linting must pass** before any task is considered done
+- **Before creating PRs**, run all CI checks locally:
+  - Tests must pass (`uv run pytest`)
+  - Type checks must pass (`uv run mypy src/`)
+  - Linting must pass (`uv run ruff check .`)
+  - Formatting must pass (`uv run ruff format --check .`)
 
 ## Important Considerations
 
