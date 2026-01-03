@@ -2,6 +2,7 @@
 # ABOUTME: Provides physics simulation and 3D visualization for practice shots.
 """Open Range driving range simulator with physics-accurate ball flight."""
 
+from gc2_connect.open_range.engine import OpenRangeEngine
 from gc2_connect.open_range.models import (
     Conditions,
     LaunchData,
@@ -15,6 +16,7 @@ from gc2_connect.open_range.models import (
 __all__ = [
     "Conditions",
     "LaunchData",
+    "OpenRangeEngine",
     "Phase",
     "ShotResult",
     "ShotSummary",

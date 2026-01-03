@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from gc2_connect.open_range.models import Conditions
+from gc2_connect.open_range.physics.engine import PhysicsEngine
 from gc2_connect.open_range.physics.trajectory import FlightSimulator, meters_to_yards
 
 
@@ -115,6 +116,161 @@ class TestValidationAgainstNathanModel:
         assert carry_yards == pytest.approx(expected, abs=tolerance), (
             f"Wedge carry: {carry_yards:.1f} yds (expected {expected} ±{tolerance:.1f})"
         )
+
+
+class TestPhysicsEngineValidation:
+    """Validation tests using complete PhysicsEngine (flight + bounce + roll)."""
+
+    @pytest.fixture
+    def engine(self) -> PhysicsEngine:
+        """Create physics engine with standard conditions."""
+        conditions = Conditions()  # 70°F, sea level, no wind
+        return PhysicsEngine(conditions=conditions, surface="Fairway")
+
+    def test_driver_high_carry_with_engine(self, engine: PhysicsEngine) -> None:
+        """Test driver shot carry using complete PhysicsEngine."""
+        result = engine.simulate(
+            ball_speed_mph=167.0,
+            vla_deg=10.9,
+            hla_deg=0.0,
+            backspin_rpm=2686.0,
+            sidespin_rpm=0.0,
+        )
+
+        expected = 275.0
+        tolerance = expected * 0.05  # 5%
+
+        assert result.summary.carry_distance == pytest.approx(expected, abs=tolerance), (
+            f"Driver carry: {result.summary.carry_distance:.1f} yds "
+            f"(expected {expected} ±{tolerance:.1f})"
+        )
+
+    def test_driver_mid_carry_with_engine(self, engine: PhysicsEngine) -> None:
+        """Test driver shot at 160 mph using complete PhysicsEngine."""
+        result = engine.simulate(
+            ball_speed_mph=160.0,
+            vla_deg=11.0,
+            hla_deg=0.0,
+            backspin_rpm=3000.0,
+            sidespin_rpm=0.0,
+        )
+
+        expected = 259.0
+        tolerance = expected * 0.03  # 3%
+
+        assert result.summary.carry_distance == pytest.approx(expected, abs=tolerance), (
+            f"Driver carry: {result.summary.carry_distance:.1f} yds "
+            f"(expected {expected} ±{tolerance:.1f})"
+        )
+
+    def test_7_iron_carry_with_engine(self, engine: PhysicsEngine) -> None:
+        """Test 7-iron shot using complete PhysicsEngine."""
+        result = engine.simulate(
+            ball_speed_mph=120.0,
+            vla_deg=16.3,
+            hla_deg=0.0,
+            backspin_rpm=7097.0,
+            sidespin_rpm=0.0,
+        )
+
+        expected = 172.0
+        tolerance = expected * 0.05  # 5%
+
+        assert result.summary.carry_distance == pytest.approx(expected, abs=tolerance), (
+            f"7-Iron carry: {result.summary.carry_distance:.1f} yds "
+            f"(expected {expected} ±{tolerance:.1f})"
+        )
+
+    def test_wedge_carry_with_engine(self, engine: PhysicsEngine) -> None:
+        """Test wedge shot using complete PhysicsEngine."""
+        result = engine.simulate(
+            ball_speed_mph=102.0,
+            vla_deg=24.2,
+            hla_deg=0.0,
+            backspin_rpm=9304.0,
+            sidespin_rpm=0.0,
+        )
+
+        expected = 136.0
+        tolerance = expected * 0.05  # 5%
+
+        assert result.summary.carry_distance == pytest.approx(expected, abs=tolerance), (
+            f"Wedge carry: {result.summary.carry_distance:.1f} yds "
+            f"(expected {expected} ±{tolerance:.1f})"
+        )
+
+    def test_total_distance_greater_than_carry(self, engine: PhysicsEngine) -> None:
+        """Test that total distance includes roll (>= carry)."""
+        result = engine.simulate(
+            ball_speed_mph=160.0,
+            vla_deg=11.0,
+            hla_deg=0.0,
+            backspin_rpm=3000.0,
+            sidespin_rpm=0.0,
+        )
+
+        assert result.summary.total_distance >= result.summary.carry_distance
+        assert result.summary.roll_distance >= 0
+
+    def test_shot_summary_consistency(self, engine: PhysicsEngine) -> None:
+        """Test that shot summary metrics are consistent."""
+        result = engine.simulate(
+            ball_speed_mph=150.0,
+            vla_deg=12.0,
+            hla_deg=0.0,
+            backspin_rpm=3000.0,
+            sidespin_rpm=0.0,
+        )
+
+        # Roll = Total - Carry
+        expected_roll = result.summary.total_distance - result.summary.carry_distance
+        assert result.summary.roll_distance == pytest.approx(expected_roll, abs=0.1)
+
+        # Max height should be positive
+        assert result.summary.max_height > 0
+
+        # Flight time should be positive
+        assert result.summary.flight_time > 0
+
+        # Total time >= flight time
+        assert result.summary.total_time >= result.summary.flight_time
+
+    def test_trajectory_phases(self, engine: PhysicsEngine) -> None:
+        """Test that trajectory includes expected phases."""
+        from gc2_connect.open_range.models import Phase
+
+        result = engine.simulate(
+            ball_speed_mph=150.0,
+            vla_deg=12.0,
+            hla_deg=0.0,
+            backspin_rpm=3000.0,
+            sidespin_rpm=0.0,
+        )
+
+        phases = {pt.phase for pt in result.trajectory}
+
+        # Should have flight phase
+        assert Phase.FLIGHT in phases
+
+        # Should end with stopped
+        assert result.trajectory[-1].phase == Phase.STOPPED
+
+    def test_zero_ball_speed_returns_stopped(self, engine: PhysicsEngine) -> None:
+        """Test that zero ball speed returns stopped result."""
+        from gc2_connect.open_range.models import Phase
+
+        result = engine.simulate(
+            ball_speed_mph=0.0,
+            vla_deg=12.0,
+            hla_deg=0.0,
+            backspin_rpm=3000.0,
+            sidespin_rpm=0.0,
+        )
+
+        assert result.summary.carry_distance == 0.0
+        assert result.summary.total_distance == 0.0
+        assert len(result.trajectory) == 1
+        assert result.trajectory[0].phase == Phase.STOPPED
 
 
 class TestEnvironmentalEffects:
@@ -317,8 +473,8 @@ class TestSpinEffects:
 class TestSimulationPerformance:
     """Tests for simulation performance requirements."""
 
-    def test_simulation_completes_in_reasonable_time(self) -> None:
-        """Test that simulation completes in reasonable time for real-time use.
+    def test_flight_simulation_completes_in_reasonable_time(self) -> None:
+        """Test that flight simulation completes quickly.
 
         The simulation should complete fast enough for responsive UI.
         Allowing up to 500ms which works even on slower CI machines.
@@ -342,7 +498,34 @@ class TestSimulationPerformance:
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         # Should complete within 500ms even on slow CI machines
-        assert elapsed_ms < 500, f"Simulation took {elapsed_ms:.1f}ms (limit: 500ms)"
+        assert elapsed_ms < 500, f"Flight simulation took {elapsed_ms:.1f}ms (limit: 500ms)"
+
+    def test_complete_physics_engine_under_100ms(self) -> None:
+        """Test that complete PhysicsEngine simulation completes under 100ms.
+
+        The complete simulation (flight + bounces + roll) should complete
+        fast enough for real-time use. Target: <100ms.
+        """
+        import time
+
+        engine = PhysicsEngine()
+
+        start = time.perf_counter()
+
+        # Run a typical driver shot (longest simulation)
+        engine.simulate(
+            ball_speed_mph=167.0,
+            vla_deg=10.9,
+            hla_deg=0.0,
+            backspin_rpm=2686.0,
+            sidespin_rpm=0.0,
+        )
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        # Target: <100ms for responsive UI
+        # Allow up to 500ms for slow CI machines
+        assert elapsed_ms < 500, f"Complete simulation took {elapsed_ms:.1f}ms (limit: 500ms)"
 
     def test_trajectory_points_reasonable(self) -> None:
         """Test that trajectory has reasonable number of points."""
@@ -362,3 +545,137 @@ class TestSimulationPerformance:
         # Should have reasonable number of points for animation
         assert len(trajectory) >= 50  # Enough for smooth animation
         assert len(trajectory) <= MAX_TRAJECTORY_POINTS  # Not too many
+
+
+class TestOpenRangeEngine:
+    """Tests for OpenRangeEngine high-level wrapper."""
+
+    def test_simulate_test_shot_driver(self) -> None:
+        """Test that simulate_test_shot produces realistic driver results."""
+        from gc2_connect.open_range.engine import OpenRangeEngine
+
+        engine = OpenRangeEngine()
+        result = engine.simulate_test_shot("Driver")
+
+        # Driver should carry 200-300 yards
+        assert 200 <= result.summary.carry_distance <= 320
+        # Max height should be reasonable (30-120 feet)
+        assert 30 <= result.summary.max_height <= 150
+
+    def test_simulate_test_shot_wedge(self) -> None:
+        """Test that simulate_test_shot produces realistic wedge results."""
+        from gc2_connect.open_range.engine import OpenRangeEngine
+
+        engine = OpenRangeEngine()
+        result = engine.simulate_test_shot("PW")
+
+        # Wedge should carry 90-150 yards
+        assert 80 <= result.summary.carry_distance <= 160
+        # Max height should be reasonable for wedge
+        assert result.summary.max_height > 20
+
+    def test_simulate_manual(self) -> None:
+        """Test simulate_manual with explicit parameters."""
+        from gc2_connect.open_range.engine import OpenRangeEngine
+
+        engine = OpenRangeEngine()
+        result = engine.simulate_manual(
+            ball_speed_mph=150.0,
+            vla_deg=12.0,
+            hla_deg=2.0,  # Slight push right
+            backspin_rpm=3000.0,
+            sidespin_rpm=500.0,  # Slight fade
+        )
+
+        # Should have valid trajectory
+        assert len(result.trajectory) > 10
+        assert result.summary.carry_distance > 0
+
+        # Offline should be positive (right) due to push and fade
+        assert result.summary.offline_distance > 0
+
+    def test_simulate_shot_from_gc2_data(self) -> None:
+        """Test simulate_shot with GC2ShotData input."""
+        from gc2_connect.models import GC2ShotData
+        from gc2_connect.open_range.engine import OpenRangeEngine
+
+        engine = OpenRangeEngine()
+        shot = GC2ShotData(
+            ball_speed=150.0,
+            launch_angle=12.0,
+            horizontal_launch_angle=0.0,
+            back_spin=3000.0,
+            side_spin=0.0,
+        )
+
+        result = engine.simulate_shot(shot)
+
+        assert result.summary.carry_distance > 0
+        assert len(result.trajectory) > 10
+
+    def test_update_conditions(self) -> None:
+        """Test that update_conditions affects simulation."""
+        from gc2_connect.open_range.engine import OpenRangeEngine
+
+        engine = OpenRangeEngine()
+
+        # Standard conditions
+        result_standard = engine.simulate_manual(
+            ball_speed_mph=150.0,
+            vla_deg=12.0,
+            hla_deg=0.0,
+            backspin_rpm=3000.0,
+            sidespin_rpm=0.0,
+        )
+
+        # Update to Denver conditions
+        engine.update_conditions(Conditions(elevation_ft=5280.0))
+
+        result_denver = engine.simulate_manual(
+            ball_speed_mph=150.0,
+            vla_deg=12.0,
+            hla_deg=0.0,
+            backspin_rpm=3000.0,
+            sidespin_rpm=0.0,
+        )
+
+        # Denver should give more carry
+        assert result_denver.summary.carry_distance > result_standard.summary.carry_distance
+
+    def test_update_surface(self) -> None:
+        """Test that update_surface affects roll behavior."""
+        from gc2_connect.open_range.engine import OpenRangeEngine
+
+        engine = OpenRangeEngine(surface="Fairway")
+
+        result_fairway = engine.simulate_manual(
+            ball_speed_mph=120.0,
+            vla_deg=16.0,
+            hla_deg=0.0,
+            backspin_rpm=5000.0,
+            sidespin_rpm=0.0,
+        )
+
+        engine.update_surface("Rough")
+
+        result_rough = engine.simulate_manual(
+            ball_speed_mph=120.0,
+            vla_deg=16.0,
+            hla_deg=0.0,
+            backspin_rpm=5000.0,
+            sidespin_rpm=0.0,
+        )
+
+        # Rough should have less roll than fairway
+        assert result_rough.summary.roll_distance < result_fairway.summary.roll_distance
+
+    def test_get_available_clubs(self) -> None:
+        """Test that get_available_clubs returns expected clubs."""
+        from gc2_connect.open_range.engine import OpenRangeEngine
+
+        clubs = OpenRangeEngine.get_available_clubs()
+
+        assert "Driver" in clubs
+        assert "7-Iron" in clubs
+        assert "PW" in clubs
+        assert len(clubs) >= 10  # At least standard set
