@@ -127,12 +127,12 @@ Target Release: v1.1.0 (with Open Range)
 
 ### Mode Selection & Settings
 
-- [ ] **Prompt 17**: Mode Selection & Shot Router
-  - [ ] Write tests for shot router
-  - [ ] Create services/shot_router.py
-  - [ ] Implement AppMode enum
-  - [ ] Implement mode switching
-  - [ ] Implement shot routing
+- [x] **Prompt 17**: Mode Selection & Shot Router
+  - [x] Write tests for shot router
+  - [x] Create services/shot_router.py
+  - [x] Implement AppMode enum
+  - [x] Implement mode switching
+  - [x] Implement shot routing
 
 - [ ] **Prompt 18**: Open Range Settings
   - [ ] Write tests for settings migration
