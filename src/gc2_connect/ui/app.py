@@ -14,7 +14,7 @@ from nicegui import ui
 from gc2_connect.config.settings import Settings, get_settings_path
 from gc2_connect.gc2.usb_reader import GC2USBReader, MockGC2Reader
 from gc2_connect.gspro.client import GSProClient
-from gc2_connect.models import GC2ShotData
+from gc2_connect.models import GC2BallStatus, GC2ShotData
 
 # Configure logging (set GC2_DEBUG=1 for verbose USB debugging)
 log_level = logging.DEBUG if os.environ.get('GC2_DEBUG') else logging.INFO
@@ -43,6 +43,8 @@ class GC2ConnectApp:
 
         # UI references
         self.gc2_status_label = None
+        self.gc2_ready_indicator = None
+        self.gc2_ball_indicator = None
         self.gspro_status_label = None
         self.shot_display = None
         self.history_list = None
@@ -50,6 +52,9 @@ class GC2ConnectApp:
         self.gspro_port_input = None
         self.history_limit_input = None
         self.settings_path_label = None
+
+        # Ball status state
+        self.send_status_to_gspro = True
 
         # Tasks
         self._gc2_task: asyncio.Task | None = None
@@ -128,6 +133,15 @@ class GC2ConnectApp:
             with ui.row().classes('items-center gap-2'):
                 self.gc2_status_label = ui.label('Disconnected').classes('text-red-500')
                 ui.badge('USB').classes('bg-gray-600')
+
+            # Ball status indicators
+            with ui.row().classes('items-center gap-4 mt-2'):
+                with ui.row().classes('items-center gap-1'):
+                    self.gc2_ready_indicator = ui.icon('circle').classes('text-gray-500 text-sm')
+                    ui.label('Ready').classes('text-sm text-gray-400')
+                with ui.row().classes('items-center gap-1'):
+                    self.gc2_ball_indicator = ui.icon('sports_golf').classes('text-gray-500 text-sm')
+                    ui.label('Ball').classes('text-sm text-gray-400')
 
             with ui.row().classes('gap-2 mt-4'):
                 ui.button('Connect', on_click=self._connect_gc2).classes('bg-green-600')
@@ -344,6 +358,7 @@ class GC2ConnectApp:
             self.gc2_reader = GC2USBReader()
 
         self.gc2_reader.add_shot_callback(self._on_shot_received)
+        self.gc2_reader.add_status_callback(self._on_status_received)
 
         if self.gc2_reader.connect():
             self.gc2_status_label.text = 'Connected'
@@ -368,6 +383,13 @@ class GC2ConnectApp:
 
         self.gc2_status_label.text = 'Disconnected'
         self.gc2_status_label.classes(remove='text-green-500', add='text-red-500')
+
+        # Reset status indicators
+        if self.gc2_ready_indicator:
+            self.gc2_ready_indicator.classes(remove='text-green-500 text-red-500', add='text-gray-500')
+        if self.gc2_ball_indicator:
+            self.gc2_ball_indicator.classes(remove='text-blue-400', add='text-gray-500')
+
         ui.notify('GC2 Disconnected', type='info')
 
     async def _connect_gspro(self):
@@ -410,6 +432,27 @@ class GC2ConnectApp:
                 ui.notify(f'Shot #{shot.shot_id} sent to GSPro', type='positive')
             else:
                 ui.notify('Failed to send shot to GSPro', type='warning')
+
+    def _on_status_received(self, status: GC2BallStatus):
+        """Handle ball status update from the GC2."""
+        logger.debug(f"Ball status: ready={status.is_ready}, ball={status.ball_detected}")
+
+        # Update UI indicators
+        if self.gc2_ready_indicator:
+            if status.is_ready:
+                self.gc2_ready_indicator.classes(remove='text-gray-500 text-red-500', add='text-green-500')
+            else:
+                self.gc2_ready_indicator.classes(remove='text-gray-500 text-green-500', add='text-red-500')
+
+        if self.gc2_ball_indicator:
+            if status.ball_detected:
+                self.gc2_ball_indicator.classes(remove='text-gray-500', add='text-blue-400')
+            else:
+                self.gc2_ball_indicator.classes(remove='text-blue-400', add='text-gray-500')
+
+        # Send status to GSPro if connected
+        if self.send_status_to_gspro and self.gspro_client and self.gspro_client.is_connected:
+            self.gspro_client.send_status(status)
 
     def _send_test_shot(self):
         """Send a test shot (mock mode only)."""

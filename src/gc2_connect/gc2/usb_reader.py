@@ -16,7 +16,7 @@ try:
 except ImportError:
     USB_AVAILABLE = False
 
-from gc2_connect.models import GC2ShotData
+from gc2_connect.models import GC2BallStatus, GC2ShotData
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,8 @@ class GC2USBReader:
         self._running = False
         self._connected = False
         self._callbacks: list[Callable[[GC2ShotData], None]] = []
+        self._status_callbacks: list[Callable[[GC2BallStatus], None]] = []
+        self._last_status: GC2BallStatus | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -45,6 +47,11 @@ class GC2USBReader:
     @property
     def is_running(self) -> bool:
         return self._running
+
+    @property
+    def last_status(self) -> GC2BallStatus | None:
+        """Get the most recent ball status."""
+        return self._last_status
 
     def add_shot_callback(self, callback: Callable[[GC2ShotData], None]):
         """Add a callback to be called when a shot is received."""
@@ -55,6 +62,15 @@ class GC2USBReader:
         if callback in self._callbacks:
             self._callbacks.remove(callback)
 
+    def add_status_callback(self, callback: Callable[[GC2BallStatus], None]):
+        """Add a callback to be called when ball status changes."""
+        self._status_callbacks.append(callback)
+
+    def remove_status_callback(self, callback: Callable[[GC2BallStatus], None]):
+        """Remove a status callback."""
+        if callback in self._status_callbacks:
+            self._status_callbacks.remove(callback)
+
     def _notify_shot(self, shot: GC2ShotData):
         """Notify all callbacks of a new shot."""
         for callback in self._callbacks:
@@ -62,6 +78,14 @@ class GC2USBReader:
                 callback(shot)
             except Exception as e:
                 logger.error(f"Shot callback error: {e}")
+
+    def _notify_status(self, status: GC2BallStatus):
+        """Notify all callbacks of a status change."""
+        for callback in self._status_callbacks:
+            try:
+                callback(status)
+            except Exception as e:
+                logger.error(f"Status callback error: {e}")
 
     def find_device(self) -> bool:
         """Find the GC2 USB device."""
@@ -438,14 +462,35 @@ class GC2USBReader:
                         if is_shot_data and line_buffer:
                             logger.debug(f"Line buffer before parse: {line_buffer!r}")
 
-                        # Always update line buffer to handle values split across packets
-                        # But only accumulate fields from 0H (shot data) messages
+                        # Handle 0M (ball tracking) messages separately from shot data
                         if '0M' in text:
-                            # For 0M messages, just update line buffer, don't accumulate
-                            # This handles cases where 0M appears mid-stream
-                            _, line_buffer = self._parse_gc2_fields(
-                                text, {}, line_buffer
+                            # Parse 0M message for ball status
+                            status_accumulator: dict[str, str] = {}
+                            status_accumulator, _ = self._parse_gc2_fields(
+                                text, status_accumulator, ""
                             )
+
+                            if status_accumulator:
+                                new_status = GC2BallStatus.from_gc2_dict(status_accumulator)
+
+                                # Only notify if status actually changed
+                                status_changed = (
+                                    self._last_status is None
+                                    or self._last_status.flags != new_status.flags
+                                    or self._last_status.ball_count != new_status.ball_count
+                                )
+
+                                if status_changed:
+                                    ready_str = "READY" if new_status.is_ready else "NOT READY"
+                                    ball_str = f"{new_status.ball_count} ball(s)" if new_status.ball_detected else "no ball"
+                                    logger.info(
+                                        f"GC2 Status: {ready_str}, {ball_str} "
+                                        f"(FLAGS={new_status.flags}, pos={new_status.ball_position})"
+                                    )
+                                    self._last_status = new_status
+                                    self._notify_status(new_status)
+
+                            # Don't accumulate 0M fields into shot data
                             continue
 
                         # Check if this is a new shot ID - if so, clear stale data
@@ -564,7 +609,9 @@ class MockGC2Reader:
         self._connected = False
         self._running = False
         self._callbacks: list[Callable[[GC2ShotData], None]] = []
+        self._status_callbacks: list[Callable[[GC2BallStatus], None]] = []
         self._shot_number = 0
+        self._last_status: GC2BallStatus | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -574,6 +621,10 @@ class MockGC2Reader:
     def is_running(self) -> bool:
         return self._running
 
+    @property
+    def last_status(self) -> GC2BallStatus | None:
+        return self._last_status
+
     def add_shot_callback(self, callback: Callable[[GC2ShotData], None]):
         self._callbacks.append(callback)
 
@@ -581,9 +632,23 @@ class MockGC2Reader:
         if callback in self._callbacks:
             self._callbacks.remove(callback)
 
+    def add_status_callback(self, callback: Callable[[GC2BallStatus], None]):
+        self._status_callbacks.append(callback)
+
+    def remove_status_callback(self, callback: Callable[[GC2BallStatus], None]):
+        if callback in self._status_callbacks:
+            self._status_callbacks.remove(callback)
+
     def connect(self) -> bool:
         self._connected = True
         logger.info("Mock GC2 connected")
+        # Simulate initial status: ready with ball detected
+        self._last_status = GC2BallStatus(flags=7, ball_count=1, ball_position=(200, 200, 10))
+        for callback in self._status_callbacks:
+            try:
+                callback(self._last_status)
+            except Exception as e:
+                logger.error(f"Status callback error: {e}")
         return True
 
     def disconnect(self):

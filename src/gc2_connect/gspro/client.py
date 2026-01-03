@@ -10,7 +10,7 @@ import logging
 import socket
 from collections.abc import Callable
 
-from gc2_connect.models import GC2ShotData, GSProResponse, GSProShotMessage
+from gc2_connect.models import GC2BallStatus, GC2ShotData, GSProResponse, GSProShotMessage
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,40 @@ class GSProClient:
         )
 
         return self._send_message(message)
+
+    def send_status(self, status: GC2BallStatus) -> GSProResponse | None:
+        """Send ball status update to GSPro.
+
+        This sends a non-shot message to GSPro indicating:
+        - Whether the launch monitor is ready (green light)
+        - Whether a ball is detected
+
+        This helps GSPro know when to expect shot data.
+        """
+        if not self._connected or not self._socket:
+            return None
+
+        message = GSProShotMessage(
+            ShotNumber=self._shot_number,
+            ShotDataOptions=GSProShotOptions(
+                ContainsBallData=False,
+                ContainsClubData=False,
+                LaunchMonitorIsReady=status.is_ready,
+                LaunchMonitorBallDetected=status.ball_detected,
+                IsHeartBeat=False,
+            ),
+        )
+
+        logger.debug(
+            f"Sending status: ready={status.is_ready}, ball_detected={status.ball_detected}"
+        )
+        return self._send_message(message)
+
+    async def send_status_async(self, status: GC2BallStatus) -> GSProResponse | None:
+        """Async version of send_status."""
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self.send_status, status
+        )
 
     def _send_message(self, message: GSProShotMessage) -> GSProResponse | None:
         """Send a message and receive response."""

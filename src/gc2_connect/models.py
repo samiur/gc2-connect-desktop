@@ -101,6 +101,68 @@ class GC2ShotData:
 
 
 @dataclass
+class GC2BallStatus:
+    """Ball detection status from the GC2 launch monitor.
+
+    The GC2 sends 0M (ball movement/tracking) messages with:
+    - FLAGS: Bitmask indicating device readiness
+      - 1 (001): Red light - not ready
+      - 7 (111): Green light - fully ready
+    - BALLS: Number of balls detected (0 or 1+)
+    - BALL1: Position of first ball as "x,y,z"
+    """
+
+    flags: int = 0
+    ball_count: int = 0
+    ball_position: tuple[int, int, int] | None = None  # (x, y, z)
+
+    @property
+    def is_ready(self) -> bool:
+        """Check if GC2 is ready (green light, FLAGS=7)."""
+        # FLAGS appears to be a 3-bit mask, 7 (111) = all ready
+        return self.flags == 7
+
+    @property
+    def ball_detected(self) -> bool:
+        """Check if a ball is detected."""
+        return self.ball_count > 0
+
+    @classmethod
+    def from_gc2_dict(cls, data: dict[str, str]) -> GC2BallStatus:
+        """Parse GC2 0M message data into a BallStatus object."""
+        status = cls()
+
+        # Parse FLAGS
+        if 'FLAGS' in data:
+            try:
+                status.flags = int(data['FLAGS'])
+            except ValueError:
+                pass
+
+        # Parse BALLS count
+        if 'BALLS' in data:
+            try:
+                status.ball_count = int(data['BALLS'])
+            except ValueError:
+                pass
+
+        # Parse BALL1 position (format: "x,y,z")
+        if 'BALL1' in data:
+            try:
+                parts = data['BALL1'].split(',')
+                if len(parts) == 3:
+                    status.ball_position = (
+                        int(parts[0]),
+                        int(parts[1]),
+                        int(parts[2]),
+                    )
+            except (ValueError, IndexError):
+                pass
+
+        return status
+
+
+@dataclass
 class GSProBallData:
     """Ball data for GSPro API."""
     Speed: float = 0.0
