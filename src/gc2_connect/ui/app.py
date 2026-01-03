@@ -5,11 +5,13 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import logging
 import os
+import signal
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import app, ui
 
 from gc2_connect.config.settings import Settings, get_settings_path
 from gc2_connect.gc2.usb_reader import GC2USBReader, MockGC2Reader
@@ -461,22 +463,97 @@ class GC2ConnectApp:
         else:
             ui.notify('Enable Mock GC2 mode to send test shots', type='info')
 
+    def shutdown(self) -> None:
+        """Clean shutdown of all connections.
 
-def create_app():
+        This method is called when the application is shutting down.
+        It ensures all connections are properly closed before exit.
+        """
+        logger.info("Shutting down GC2 Connect...")
+
+        # Cancel GC2 read task first
+        if self._gc2_task:
+            logger.debug("Cancelling GC2 read task...")
+            self._gc2_task.cancel()
+            self._gc2_task = None
+
+        # Disconnect from GC2
+        if self.gc2_reader:
+            logger.info("Disconnecting from GC2...")
+            try:
+                self.gc2_reader.disconnect()
+            except Exception as e:
+                logger.error(f"Error disconnecting from GC2: {e}")
+            self.gc2_reader = None
+
+        # Disconnect from GSPro
+        if self.gspro_client:
+            logger.info("Disconnecting from GSPro...")
+            try:
+                self.gspro_client.disconnect()
+            except Exception as e:
+                logger.error(f"Error disconnecting from GSPro: {e}")
+            self.gspro_client = None
+
+        logger.info("Shutdown complete")
+
+
+# Global reference to the app instance for shutdown handling
+_app_instance: GC2ConnectApp | None = None
+
+
+def create_app() -> GC2ConnectApp:
     """Create and configure the application."""
+    global _app_instance
+
     gc2_app = GC2ConnectApp()
     gc2_app.build_ui()
+    _app_instance = gc2_app
+
+    # Register shutdown handler for clean disconnection
+    app.on_shutdown(gc2_app.shutdown)
+
     return gc2_app
 
 
+def _atexit_handler() -> None:
+    """Fallback shutdown handler called at interpreter exit."""
+    global _app_instance
+    if _app_instance is not None:
+        logger.debug("atexit handler triggered")
+        _app_instance.shutdown()
+        _app_instance = None
+
+
+def _signal_handler(signum: int, _frame: object) -> None:
+    """Handle SIGINT/SIGTERM for graceful shutdown."""
+    sig_name = signal.Signals(signum).name
+    logger.info(f"Received {sig_name}, initiating shutdown...")
+
+    global _app_instance
+    if _app_instance is not None:
+        _app_instance.shutdown()
+        _app_instance = None
+
+    # Re-raise to allow default behavior (exit)
+    raise SystemExit(0)
+
+
 @ui.page('/')
-def main_page():
+def main_page() -> None:
     """Main page."""
     create_app()
 
 
-def main():
+def main() -> None:
     """Entry point."""
+    # Register atexit handler as fallback
+    atexit.register(_atexit_handler)
+
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
     ui.run(
         title='GC2 Connect',
         port=8080,
