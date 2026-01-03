@@ -3,16 +3,20 @@
 """Configuration and settings for GC2 Connect."""
 
 from gc2_connect.config.settings import (
+    ConditionsSettings,
     GC2Settings,
     GSProSettings,
+    OpenRangeSettings,
     Settings,
     UISettings,
     get_settings_path,
 )
 
 __all__ = [
+    "ConditionsSettings",
     "GC2Settings",
     "GSProSettings",
+    "OpenRangeSettings",
     "Settings",
     "UISettings",
     "get_settings_path",

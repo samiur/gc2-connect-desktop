@@ -41,17 +41,46 @@ class UISettings(BaseModel):
     history_limit: Annotated[int, Field(gt=0, description="Maximum shots to keep in history")] = 50
 
 
+class ConditionsSettings(BaseModel):
+    """Environmental conditions for Open Range simulation."""
+
+    temp_f: Annotated[float, Field(description="Temperature in Fahrenheit")] = 70.0
+    elevation_ft: Annotated[float, Field(description="Elevation in feet")] = 0.0
+    humidity_pct: Annotated[float, Field(description="Humidity percentage")] = 50.0
+    wind_speed_mph: Annotated[float, Field(description="Wind speed in mph")] = 0.0
+    wind_dir_deg: Annotated[
+        float, Field(description="Wind direction in degrees (0=from north/headwind)")
+    ] = 0.0
+
+
+class OpenRangeSettings(BaseModel):
+    """Settings for Open Range driving range simulator."""
+
+    conditions: Annotated[ConditionsSettings, Field(description="Environmental conditions")] = (
+        ConditionsSettings()
+    )
+    surface: Annotated[str, Field(description="Ground surface type")] = "Fairway"
+    show_trajectory: Annotated[bool, Field(description="Show trajectory line")] = True
+    camera_follow: Annotated[bool, Field(description="Camera follows ball")] = True
+
+
 class Settings(BaseModel):
     """Application settings with persistence."""
 
-    version: Annotated[int, Field(description="Settings schema version")] = 1
+    version: Annotated[int, Field(description="Settings schema version")] = 2
+    mode: Annotated[str, Field(description="Current app mode (gspro or open_range)")] = "gspro"
     gspro: Annotated[GSProSettings, Field(description="GSPro settings")] = GSProSettings()
     gc2: Annotated[GC2Settings, Field(description="GC2 settings")] = GC2Settings()
     ui: Annotated[UISettings, Field(description="UI settings")] = UISettings()
+    open_range: Annotated[OpenRangeSettings, Field(description="Open Range settings")] = (
+        OpenRangeSettings()
+    )
 
     @classmethod
     def load(cls, path: Path | None = None) -> Settings:
         """Load settings from file, returning defaults if file doesn't exist.
+
+        Handles migration from v1 to v2 automatically.
 
         Args:
             path: Optional custom path to load from. Uses platform default if None.
@@ -67,6 +96,7 @@ class Settings(BaseModel):
 
         try:
             data = json.loads(settings_path.read_text())
+            data = cls._migrate(data)
             return cls(**data)
         except json.JSONDecodeError as e:
             logger.warning(f"Invalid JSON in settings file: {e}, using defaults")
@@ -74,6 +104,31 @@ class Settings(BaseModel):
         except Exception as e:
             logger.warning(f"Error loading settings: {e}, using defaults")
             return cls()
+
+    @classmethod
+    def _migrate(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Migrate settings from older versions to current version.
+
+        Args:
+            data: Raw settings data from file.
+
+        Returns:
+            Migrated settings data.
+        """
+        version = data.get("version", 1)
+
+        if version < 2:
+            logger.info(f"Migrating settings from v{version} to v2")
+            # Add mode field (default to gspro for existing users)
+            if "mode" not in data:
+                data["mode"] = "gspro"
+            # Add open_range settings with defaults
+            if "open_range" not in data:
+                data["open_range"] = OpenRangeSettings().model_dump()
+            # Update version
+            data["version"] = 2
+
+        return data
 
     def save(self, path: Path | None = None) -> None:
         """Save settings to file.
@@ -101,9 +156,11 @@ class Settings(BaseModel):
         """
         return {
             "version": self.version,
+            "mode": self.mode,
             "gspro": self.gspro.model_dump(),
             "gc2": self.gc2.model_dump(),
             "ui": self.ui.model_dump(),
+            "open_range": self.open_range.model_dump(),
         }
 
 
