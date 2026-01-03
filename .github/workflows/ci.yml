@@ -28,7 +28,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --extra dev
 
       - name: Run tests
         run: uv run pytest -v --tb=short
@@ -45,7 +45,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --extra dev
 
       - name: Run ruff check
         run: uv run ruff check .
@@ -65,7 +65,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --extra dev
 
       - name: Run mypy
         run: uv run mypy src

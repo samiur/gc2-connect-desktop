@@ -161,3 +161,141 @@ def gspro_player_response_dict() -> dict[str, Any]:
 def gspro_error_response_dict() -> dict[str, Any]:
     """Fixture providing a GSPro error response dictionary."""
     return {"Code": 500, "Message": "Internal error"}
+
+
+# Integration test fixtures
+
+
+@pytest.fixture
+def mock_gspro_server():
+    """Fixture that runs a mock GSPro server in a background thread.
+
+    The server accepts shot data and returns success responses.
+    Use `server.received_shots` to inspect what was received.
+
+    Yields:
+        MockGSProServer instance with host, port, and received_shots attributes.
+    """
+    import socket
+    import threading
+    from dataclasses import dataclass
+    from dataclasses import field as dataclass_field
+
+    @dataclass
+    class MockGSProServer:
+        host: str
+        port: int
+        received_shots: list[dict[str, Any]] = dataclass_field(default_factory=list)
+        _server: socket.socket | None = None
+        _thread: threading.Thread | None = None
+        _running: bool = False
+        _conn: socket.socket | None = None
+
+    def run_server(server: MockGSProServer) -> None:
+        """Run the mock GSPro server."""
+        server._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server._server.settimeout(0.5)  # Allow checking _running flag
+        server._server.bind((server.host, server.port))
+        server._server.listen(1)
+
+        while server._running:
+            try:
+                conn, _addr = server._server.accept()
+                server._conn = conn
+                conn.settimeout(0.5)
+
+                while server._running:
+                    try:
+                        data = conn.recv(4096)
+                        if not data:
+                            break
+
+                        # Parse and store received shot
+                        try:
+                            message = json.loads(data.decode("utf-8"))
+                            server.received_shots.append(message)
+
+                            # Send success response with player info
+                            # Use Code 201 to include player info (per GSPro API)
+                            response = {
+                                "Code": 201,
+                                "Message": "Shot received with player info",
+                                "Player": {"Handed": "RH", "Club": "DR"},
+                            }
+                            conn.sendall(json.dumps(response).encode("utf-8"))
+                        except json.JSONDecodeError:
+                            pass
+
+                    except TimeoutError:
+                        continue
+                    except OSError:
+                        break
+
+                conn.close()
+                server._conn = None
+
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+
+        if server._server:
+            server._server.close()
+
+    # Find a free port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    server = MockGSProServer(host="127.0.0.1", port=port)
+    server._running = True
+    server._thread = threading.Thread(target=run_server, args=(server,), daemon=True)
+    server._thread.start()
+
+    # Give server time to start
+    import time
+
+    time.sleep(0.1)
+
+    yield server
+
+    # Cleanup
+    server._running = False
+    if server._conn:
+        try:
+            server._conn.close()
+        except Exception:
+            pass
+    if server._thread:
+        server._thread.join(timeout=1.0)
+
+
+@pytest.fixture
+def mock_gc2_reader():
+    """Fixture providing a MockGC2Reader instance."""
+    from gc2_connect.gc2.usb_reader import MockGC2Reader
+
+    reader = MockGC2Reader()
+    yield reader
+    if reader.is_connected:
+        reader.disconnect()
+
+
+@pytest.fixture
+def gspro_client(mock_gspro_server):
+    """Fixture providing a GSProClient connected to the mock server."""
+    import time
+
+    from gc2_connect.gspro.client import GSProClient
+
+    client = GSProClient(host=mock_gspro_server.host, port=mock_gspro_server.port)
+    connected = client.connect()
+    assert connected, "Failed to connect to mock GSPro server"
+
+    # Wait for heartbeat to be processed by server
+    time.sleep(0.1)
+
+    yield client
+    if client.is_connected:
+        client.disconnect()

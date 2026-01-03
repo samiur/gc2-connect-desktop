@@ -68,10 +68,10 @@ Target Release: v1.1.0 (with Open Range)
 
 ## Phase 4: GSPro Features
 
-- [ ] **Prompt 9**: Integration Tests
-  - [ ] Test full shot flow (MockGC2 -> App -> MockGSPro)
-  - [ ] Test connection handling
-  - [ ] Create test fixtures
+- [x] **Prompt 9**: Integration Tests
+  - [x] Test full shot flow (MockGC2 -> App -> MockGSPro)
+  - [x] Test connection handling
+  - [x] Create test fixtures
 
 - [ ] **Prompt 10**: Shot History Improvements
   - [ ] Create ShotHistoryManager
