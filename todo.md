@@ -118,12 +118,12 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Implement roll physics (deceleration)
   - [x] Test surface types (Fairway, Rough, Green)
 
-- [ ] **Prompt 16**: Physics Engine Integration
-  - [ ] Write validation tests (driver, 7-iron, wedge)
-  - [ ] Create open_range/physics/engine.py (PhysicsEngine)
-  - [ ] Create open_range/engine.py (OpenRangeEngine)
-  - [ ] Performance test < 100ms per shot
-  - [ ] Validate carry distances within 5% tolerance
+- [x] **Prompt 16**: Physics Engine Integration
+  - [x] Write validation tests (driver, 7-iron, wedge)
+  - [x] Create open_range/physics/engine.py (PhysicsEngine)
+  - [x] Create open_range/engine.py (OpenRangeEngine)
+  - [x] Performance test < 100ms per shot
+  - [x] Validate carry distances within 5% tolerance
 
 ### Mode Selection & Settings
 

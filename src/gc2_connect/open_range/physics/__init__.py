@@ -8,6 +8,8 @@ from gc2_connect.open_range.physics.aerodynamics import (
     get_drag_coefficient,
     get_lift_coefficient,
 )
+from gc2_connect.open_range.physics.engine import PhysicsEngine
+from gc2_connect.open_range.physics.ground import GroundPhysics
 from gc2_connect.open_range.physics.trajectory import (
     FlightSimulator,
     SimulationState,
@@ -29,6 +31,9 @@ __all__ = [
     "calculate_reynolds",
     "get_drag_coefficient",
     "get_lift_coefficient",
+    # Physics Engine
+    "GroundPhysics",
+    "PhysicsEngine",
     # Trajectory
     "FlightSimulator",
     "SimulationState",
