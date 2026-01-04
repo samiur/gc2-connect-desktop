@@ -1,0 +1,29 @@
+# ABOUTME: Pre-commit hooks configuration for GC2 Connect Desktop.
+# ABOUTME: Runs ruff, mypy, and pytest checks before each commit.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: [src/]
+
+      - id: pytest
+        name: pytest
+        entry: uv run pytest
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: [--tb=short, -q]
+        stages: [pre-push]
