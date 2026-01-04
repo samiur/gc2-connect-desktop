@@ -183,10 +183,10 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Test Open Range user flows
   - [x] Test error handling
 
-- [ ] **Prompt 23**: Type Checking & Linting
-  - [ ] Fix all mypy errors
-  - [ ] Fix all ruff issues
-  - [ ] Add pre-commit hooks
+- [x] **Prompt 23**: Type Checking & Linting
+  - [x] Fix all mypy errors
+  - [x] Fix all ruff issues
+  - [x] Add pre-commit hooks
 
 - [ ] **Prompt 24**: Documentation & Release
   - [ ] Update README for Open Range
