@@ -266,51 +266,46 @@ class TestCameraPosition:
 
     def test_calculate_camera_position_at_start(self) -> None:
         """Test camera position at ball start."""
-        from gc2_connect.open_range.models import Vec3
         from gc2_connect.open_range.visualization.ball_animation import (
             calculate_camera_position,
         )
 
-        ball_pos = Vec3(x=0.0, y=0.0, z=0.0)
-        camera_pos = calculate_camera_position(ball_pos)
+        # Ball at origin (z=0)
+        camera_pos = calculate_camera_position(ball_z=0.0)
 
-        # Camera should be behind (negative Z) and above ball
+        # Camera should be behind (negative Z) and above ground
         # Scene coordinates: X=lateral, Y=height, Z=forward
-        assert camera_pos.z < ball_pos.z  # Behind on Z axis
-        assert camera_pos.y > ball_pos.y  # Above
+        assert camera_pos.z < 0.0  # Behind on Z axis
+        assert camera_pos.y > 0.0  # Above ground
 
     def test_calculate_camera_position_follows_ball(self) -> None:
         """Test camera follows ball during flight."""
-        from gc2_connect.open_range.models import Vec3
         from gc2_connect.open_range.visualization.ball_animation import (
             calculate_camera_position,
         )
 
         # Ball at origin
-        pos1 = Vec3(x=0.0, y=0.0, z=0.0)
-        cam1 = calculate_camera_position(pos1)
+        cam1 = calculate_camera_position(ball_z=0.0)
 
         # Ball has moved forward (forward is +Z in scene coordinates)
-        pos2 = Vec3(x=5.0, y=50.0, z=100.0)
-        cam2 = calculate_camera_position(pos2)
+        cam2 = calculate_camera_position(ball_z=100.0)
 
         # Camera should have moved forward (positive Z) as well
         assert cam2.z > cam1.z
 
     def test_camera_maintains_relative_offset(self) -> None:
         """Test camera maintains consistent offset from ball."""
-        from gc2_connect.open_range.models import Vec3
         from gc2_connect.open_range.visualization.ball_animation import (
             CAMERA_FOLLOW_DISTANCE,
             calculate_camera_position,
         )
 
         # Ball at 100 yards forward (scene Z=100)
-        ball_pos = Vec3(x=0.0, y=30.0, z=100.0)
-        camera_pos = calculate_camera_position(ball_pos)
+        ball_z = 100.0
+        camera_pos = calculate_camera_position(ball_z=ball_z)
 
         # Camera should be behind ball by follow distance (on Z axis)
-        assert abs(ball_pos.z - camera_pos.z - CAMERA_FOLLOW_DISTANCE) < 10
+        assert abs(ball_z - camera_pos.z - CAMERA_FOLLOW_DISTANCE) < 10
 
 
 class TestPhaseColors:

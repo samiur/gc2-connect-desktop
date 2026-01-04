@@ -56,11 +56,12 @@ class AnimationFrame:
     time: float
 
 
-def calculate_camera_position(ball_pos: Vec3) -> Vec3:
-    """Calculate camera position to follow the ball.
+def calculate_camera_position(ball_z: float) -> Vec3:
+    """Calculate camera position to track ball along the range.
 
-    The camera follows behind and above the ball to provide
-    a good view of the flight and landing.
+    The camera stays at a fixed lateral position and height,
+    moving only along the Z axis (forward) to track the ball.
+    This prevents the scene from rotating during animation.
 
     Scene coordinate system:
     - X: Lateral (+ = right)
@@ -68,15 +69,34 @@ def calculate_camera_position(ball_pos: Vec3) -> Vec3:
     - Z: Forward (+ = away from tee)
 
     Args:
-        ball_pos: Current ball position in scene coordinates.
+        ball_z: Ball's Z position (forward distance) in scene coordinates.
 
     Returns:
         Camera position in scene coordinates.
     """
     return Vec3(
-        x=ball_pos.x + CAMERA_LATERAL_OFFSET,  # Slightly to the right for view
-        y=max(ball_pos.y + CAMERA_HEIGHT_OFFSET / 3, CAMERA_HEIGHT_OFFSET / 3),
-        z=ball_pos.z - CAMERA_FOLLOW_DISTANCE,  # Behind the ball (negative Z)
+        x=CAMERA_LATERAL_OFFSET,  # Fixed lateral offset from center
+        y=CAMERA_HEIGHT_OFFSET,  # Fixed height
+        z=max(ball_z - CAMERA_FOLLOW_DISTANCE, -CAMERA_FOLLOW_DISTANCE),  # Behind the ball
+    )
+
+
+def calculate_camera_look_at(ball_z: float) -> Vec3:
+    """Calculate where camera should look.
+
+    Looks at a point along the center of the range at the ball's Z distance.
+    This keeps the ground stable and prevents rotation.
+
+    Args:
+        ball_z: Ball's Z position (forward distance) in scene coordinates.
+
+    Returns:
+        Look-at position in scene coordinates.
+    """
+    return Vec3(
+        x=0.0,  # Look at center of range
+        y=5.0,  # Look slightly above ground
+        z=ball_z + 50.0,  # Look ahead of ball
     )
 
 
@@ -289,9 +309,11 @@ class BallAnimator:
                 )
                 scene.update_ball_position(scene_pos)
 
-                # Update camera to follow ball
-                camera_pos = calculate_camera_position(scene_pos)
-                scene.update_camera(camera_pos, scene_pos)
+                # Update camera to track ball along range
+                # Camera moves along Z axis, keeping stable view (no rotation)
+                camera_pos = calculate_camera_position(scene_pos.z)
+                look_at = calculate_camera_look_at(scene_pos.z)
+                scene.update_camera(camera_pos, look_at)
 
             # Wait for next frame
             await asyncio.sleep(frame_delay)
