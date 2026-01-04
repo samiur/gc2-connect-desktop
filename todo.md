@@ -158,13 +158,13 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Implement phase indicators
   - [x] Implement shot data display
 
-- [ ] **Prompt 21**: Open Range Integration
-  - [ ] Write integration flow tests
-  - [ ] Update ui/app.py with mode selector
-  - [ ] Wire shot router to GC2 reader
-  - [ ] Wire shot router to GSPro and Open Range
-  - [ ] Handle mode-specific UI visibility
-  - [ ] Performance validation
+- [x] **Prompt 21**: Open Range Integration
+  - [x] Write integration flow tests
+  - [x] Update ui/app.py with mode selector
+  - [x] Wire shot router to GC2 reader
+  - [x] Wire shot router to GSPro and Open Range
+  - [x] Handle mode-specific UI visibility
+  - [x] Performance validation
 
 ---
 

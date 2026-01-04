@@ -255,8 +255,13 @@ class RangeScene:
             return
 
         with self.scene:
-            # NiceGUI's scene context provides lighting methods
-            self.scene.point_light(intensity=AMBIENT_LIGHT_INTENSITY * 1000).move(0, 50, 0)
+            # NiceGUI's scene uses spot_light (no point_light available)
+            # Use a wide-angle spot light as ambient simulation
+            self.scene.spot_light(
+                intensity=AMBIENT_LIGHT_INTENSITY * 1000,
+                distance=500,
+                angle=180,  # Wide angle for ambient effect
+            ).move(0, 50, 0)
 
             # Directional light from above/behind
             self.scene.spot_light(
