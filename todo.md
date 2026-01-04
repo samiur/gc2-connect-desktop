@@ -177,11 +177,11 @@ Target Release: v1.1.0 (with Open Range)
 
 ## Phase 6: Polish & Release
 
-- [ ] **Prompt 22**: End-to-End Tests
-  - [ ] Setup e2e infrastructure
-  - [ ] Test GSPro user flows
-  - [ ] Test Open Range user flows
-  - [ ] Test error handling
+- [x] **Prompt 22**: End-to-End Tests
+  - [x] Setup e2e infrastructure
+  - [x] Test GSPro user flows
+  - [x] Test Open Range user flows
+  - [x] Test error handling
 
 - [ ] **Prompt 23**: Type Checking & Linting
   - [ ] Fix all mypy errors
