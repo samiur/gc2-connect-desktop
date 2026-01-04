@@ -143,13 +143,13 @@ Target Release: v1.1.0 (with Open Range)
 
 ### Visualization & UI
 
-- [ ] **Prompt 19**: 3D Driving Range Visualization
-  - [ ] Write tests for visualization
-  - [ ] Create open_range/visualization/range_scene.py
-  - [ ] Create ground plane and distance markers
-  - [ ] Create target greens
-  - [ ] Create open_range/visualization/ball_animation.py
-  - [ ] Implement ball flight animation
+- [x] **Prompt 19**: 3D Driving Range Visualization
+  - [x] Write tests for visualization
+  - [x] Create open_range/visualization/range_scene.py
+  - [x] Create ground plane and distance markers
+  - [x] Create target greens
+  - [x] Create open_range/visualization/ball_animation.py
+  - [x] Implement ball flight animation
 
 - [ ] **Prompt 20**: Open Range UI Panel
   - [ ] Write integration tests
