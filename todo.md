@@ -166,12 +166,12 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Handle mode-specific UI visibility
   - [x] Performance validation
 
-- [ ] **Prompt 21b**: Ball Trajectory Tracing
-  - [ ] Write tests for trajectory trace
-  - [ ] Implement draw_trajectory_line() in range_scene.py
-  - [ ] Update BallAnimator to draw trajectory progressively
-  - [ ] Use phase-appropriate colors (Flight=green, Bounce=orange, Rolling=blue)
-  - [ ] Ensure trace remains visible after animation
+- [x] **Prompt 21b**: Ball Trajectory Tracing
+  - [x] Write tests for trajectory trace
+  - [x] Implement draw_trajectory_line() in range_scene.py
+  - [x] Update BallAnimator to draw trajectory progressively
+  - [x] Use phase-appropriate colors (Flight=green, Bounce=orange, Rolling=blue)
+  - [x] Ensure trace remains visible after animation
 
 ---
 

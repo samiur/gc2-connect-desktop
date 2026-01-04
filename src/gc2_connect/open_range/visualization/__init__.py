@@ -1,10 +1,11 @@
 # ABOUTME: Open Range visualization module for 3D driving range display.
-# ABOUTME: Provides scene setup, ball animation, and camera controls.
+# ABOUTME: Provides scene setup, ball animation, trajectory trace, and camera controls.
 """Open Range visualization components.
 
 This module provides:
 - RangeScene: 3D driving range environment setup
 - BallAnimator: Ball flight animation along trajectory
+- TrajectoryTrace: Visible trace of ball flight path
 - Camera utilities for following ball flight
 
 The visualization uses NiceGUI's Three.js integration (ui.scene)
@@ -32,6 +33,12 @@ from gc2_connect.open_range.visualization.range_scene import (
     trajectory_to_scene_coords,
     yards_to_scene,
 )
+from gc2_connect.open_range.visualization.trajectory_trace import (
+    TRACE_COLORS,
+    TraceSegment,
+    TrajectoryTrace,
+    get_phase_color,
+)
 
 __all__ = [
     # RangeScene exports
@@ -53,4 +60,9 @@ __all__ = [
     "CAMERA_FOLLOW_DISTANCE",
     "calculate_follow_camera",
     "get_tee_box_camera",
+    # TrajectoryTrace exports
+    "TrajectoryTrace",
+    "TraceSegment",
+    "TRACE_COLORS",
+    "get_phase_color",
 ]

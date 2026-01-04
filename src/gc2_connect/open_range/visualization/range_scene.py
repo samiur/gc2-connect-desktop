@@ -24,7 +24,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from gc2_connect.open_range.models import TrajectoryPoint, Vec3
+from gc2_connect.open_range.models import Phase, TrajectoryPoint, Vec3
+from gc2_connect.open_range.visualization.trajectory_trace import TrajectoryTrace
 
 if TYPE_CHECKING:
     pass
@@ -173,7 +174,7 @@ class RangeScene:
         self.height = height
         self.scene: Any = None
         self.ball: Any = None
-        self.trajectory_line: Any = None
+        self.trajectory_trace: TrajectoryTrace = TrajectoryTrace()
         # Camera behind tee (negative Z), above ground (positive Y), centered (X=0)
         self._camera_position: Vec3 = Vec3(x=0.0, y=15.0, z=-20.0)
 
@@ -527,27 +528,51 @@ class RangeScene:
                 up_z=0,
             )
 
-    def draw_trajectory_line(self, points: list[Vec3]) -> None:
+    def draw_trajectory_line(
+        self, trajectory: list[TrajectoryPoint], sample_interval: int = 5
+    ) -> None:
         """Draw the trajectory path line.
 
+        Uses small spheres as "breadcrumbs" along the path, colored by phase.
+        This creates a visible trace showing the complete ball flight.
+
         Args:
-            points: List of positions forming the trajectory.
+            trajectory: List of trajectory points with phase information.
+            sample_interval: Draw every Nth point (default 5 for performance).
         """
-        if self.scene is None or len(points) < 2:
+        if self.scene is None or len(trajectory) < 2:
             return
 
-        # Clear existing trajectory line
-        if self.trajectory_line is not None:
-            try:
-                self.trajectory_line.delete()
-            except Exception:
-                pass
+        # Build trace from trajectory
+        self.trajectory_trace.build_from_trajectory(trajectory, sample_interval)
 
-        # Draw new line using connected cylinders
-        # Note: NiceGUI's scene doesn't have a direct line API
-        # For now, we skip the trajectory line as it requires
-        # more complex Three.js integration
-        pass
+        # Draw all segments in the scene
+        self.trajectory_trace.draw_in_scene(self.scene)
+
+    def add_trajectory_point(self, position: Vec3, phase: Phase) -> None:
+        """Add a point to the trajectory trace progressively.
+
+        Call this during animation to build the trace as the ball moves.
+        Each point creates a new segment from the previous point.
+
+        Args:
+            position: Ball position in scene coordinates.
+            phase: Current phase of ball motion.
+        """
+        if self.scene is None:
+            return
+
+        # Add point to trace
+        self.trajectory_trace.add_point(position, phase)
+
+        # Draw the new segment if one was created
+        if self.trajectory_trace.segments:
+            latest_segment = self.trajectory_trace.segments[-1]
+            self.trajectory_trace.draw_segment_in_scene(self.scene, latest_segment)
+
+    def clear_trajectory_line(self) -> None:
+        """Remove the current trajectory line from scene."""
+        self.trajectory_trace.clear()
 
     def reset_ball(self) -> None:
         """Reset ball to starting position on tee box."""

@@ -257,8 +257,10 @@ class BallAnimator:
         scene: RangeScene | None = None,
         speed: float = DEFAULT_SPEED_MULTIPLIER,
         on_phase_change: Callable[[Phase], None] | None = None,
+        draw_trace: bool = True,
+        trace_sample_interval: int = 3,
     ) -> None:
-        """Animate ball along trajectory with cinematic camera.
+        """Animate ball along trajectory with cinematic camera and trace.
 
         Camera behavior:
         1. Start at tee box view, hold for CAMERA_FOLLOW_DELAY seconds
@@ -266,11 +268,18 @@ class BallAnimator:
         3. After ball stops, hold final position for CAMERA_END_DELAY seconds
         4. Reset camera to tee box view
 
+        Trace behavior:
+        - Trace is drawn progressively as ball moves
+        - Each phase gets a different color (flight=green, bounce=orange, roll=blue)
+        - Trace remains visible after animation completes
+
         Args:
             result: Shot result with trajectory data.
             scene: RangeScene to animate in (optional).
             speed: Animation speed multiplier.
             on_phase_change: Callback when phase changes.
+            draw_trace: Whether to draw trajectory trace (default True).
+            trace_sample_interval: Draw trace point every N frames (default 3).
         """
         self.trajectory = result.trajectory
         self.is_animating = True
@@ -280,6 +289,10 @@ class BallAnimator:
         if not self.trajectory:
             self.is_animating = False
             return
+
+        # Clear any existing trace before starting new animation
+        if scene is not None and draw_trace:
+            scene.clear_trajectory_line()
 
         # Calculate animation frames
         frames = self.calculate_animation_frames(self.trajectory, speed_multiplier=speed)
@@ -335,6 +348,10 @@ class BallAnimator:
                 )
                 scene.update_ball_position(scene_pos)
 
+                # Draw trace point progressively (every N frames for performance)
+                if draw_trace and i % trace_sample_interval == 0:
+                    scene.add_trajectory_point(scene_pos, current_phase)
+
                 # Camera behavior: stay at tee, then follow
                 if frame_time >= follow_start_time:
                     # Follow the ball
@@ -345,7 +362,7 @@ class BallAnimator:
             # Wait for next frame
             await asyncio.sleep(frame_delay)
 
-        # Hold on final position
+        # Hold on final position (trace remains visible)
         if scene is not None and self.is_animating:
             await asyncio.sleep(CAMERA_END_DELAY / speed)
 
