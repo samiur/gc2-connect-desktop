@@ -157,7 +157,11 @@ class RangeScene:
         try:
             from nicegui import ui
 
-            self.scene = ui.scene(width=self.width, height=self.height)
+            self.scene = ui.scene(
+                width=self.width,
+                height=self.height,
+                background_color=SKY_COLOR,
+            )
             with self.scene:
                 self._create_ground()
                 self._create_distance_markers()
