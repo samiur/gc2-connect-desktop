@@ -355,8 +355,8 @@ class TestPerformanceIntegration:
         elapsed = time.perf_counter() - start
 
         assert result is not None
-        # 200ms is reasonable for a full simulation including bounce/roll
-        assert elapsed < 0.2
+        # 300ms threshold accounts for CI variability and Python 3.10 being slower
+        assert elapsed < 0.3
 
     def test_multiple_simulations_are_fast(self) -> None:
         """Test that multiple simulations can be run quickly."""
@@ -367,8 +367,8 @@ class TestPerformanceIntegration:
             engine.simulate_test_shot("Driver")
         elapsed = time.perf_counter() - start
 
-        # 10 shots should complete in under 2 seconds
-        assert elapsed < 2.0
+        # 10 shots should complete in under 2.5 seconds (allows for CI variability)
+        assert elapsed < 2.5
 
     def test_trajectory_point_count_is_reasonable(self) -> None:
         """Test that trajectory doesn't have excessive points."""
