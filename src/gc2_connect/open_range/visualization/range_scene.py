@@ -50,12 +50,44 @@ TARGET_GREENS: list[dict[str, float]] = [
 AMBIENT_LIGHT_INTENSITY: float = 0.5
 DIRECTIONAL_LIGHT_INTENSITY: float = 0.8
 
-# Colors (dark theme friendly)
-GROUND_COLOR: str = "#2d5a27"  # Dark green fairway
+# Tee box configuration (yards)
+TEE_BOX_WIDTH: float = 12.0  # Width of tee box area
+TEE_BOX_DEPTH: float = 8.0  # Depth of tee box area
+TEE_MAT_WIDTH: float = 5.0  # Width of hitting mat
+TEE_MAT_DEPTH: float = 3.0  # Depth of hitting mat
+TEE_BOX_HEIGHT: float = 0.3  # Slight elevation
+
+# Backdrop configuration (yards)
+TREELINE_START_DISTANCE: float = 320.0  # Where trees start
+TREELINE_DEPTH: float = 80.0  # How deep the tree forest is
+TREE_MIN_HEIGHT: float = 15.0  # Minimum tree height
+TREE_MAX_HEIGHT: float = 35.0  # Maximum tree height
+TREE_BASE_RADIUS: float = 6.0  # Tree cone base radius
+TREES_PER_ROW: int = 25  # Number of trees per row
+TREE_ROWS: int = 5  # Number of tree rows
+
+# Cloud configuration
+CLOUD_COUNT: int = 12  # Number of cloud clusters
+CLOUD_MIN_HEIGHT: float = 80.0  # Minimum cloud height (yards)
+CLOUD_MAX_HEIGHT: float = 120.0  # Maximum cloud height (yards)
+CLOUD_SPREAD: float = 300.0  # Horizontal spread of clouds (yards)
+
+# Sky dome configuration
+SKY_DOME_RADIUS: float = 500.0  # Radius of sky dome (yards)
+
+# Colors
+GROUND_COLOR: str = "#3d8c40"  # Bright green fairway (like reference)
 MARKER_COLOR: str = "#ffffff"  # White markers
-GREEN_COLOR: str = "#1a4d1a"  # Darker green for targets
+GREEN_COLOR: str = "#2d7030"  # Slightly darker green for targets
 BALL_COLOR: str = "#f0f0f0"  # Off-white ball
-SKY_COLOR: str = "#1a2632"  # Dark blue-gray sky
+SKY_COLOR: str = "#87ceeb"  # Sky blue (brighter)
+TEE_BOX_COLOR: str = "#2d6830"  # Darker green for tee box
+TEE_MAT_COLOR: str = "#4a9050"  # Lighter green hitting mat
+TREE_COLOR: str = "#1a5a20"  # Dark green for pine trees
+TREE_TRUNK_COLOR: str = "#4a3520"  # Brown for tree trunks
+CLOUD_COLOR: str = "#ffffff"  # White clouds
+FAIRWAY_STRIPE_LIGHT: str = "#45a048"  # Lighter stripe for mowing pattern
+FAIRWAY_STRIPE_DARK: str = "#3d8c40"  # Darker stripe for mowing pattern
 
 # Scene scale: 1 yard = 1 scene unit
 SCENE_SCALE: float = 1.0
@@ -161,9 +193,13 @@ class RangeScene:
                 width=self.width,
                 height=self.height,
                 background_color=SKY_COLOR,
+                grid=False,  # Disable grid for cleaner look
             )
             with self.scene:
+                self._create_clouds()
+                self._create_backdrop()
                 self._create_ground()
+                self._create_tee_box()
                 self._create_distance_markers()
                 self._create_target_greens()
                 self._setup_lighting()
@@ -174,11 +210,48 @@ class RangeScene:
             # Not in NiceGUI context - return None for testing
             return None
 
-    def _create_ground(self) -> None:
-        """Create the driving range ground plane.
+    def _create_clouds(self) -> None:
+        """Create cloud clusters in the sky.
 
-        Creates a large flat green surface extending the full length
-        and width of the range.
+        Creates fluffy cloud formations using grouped spheres,
+        similar to the reference implementation.
+        """
+        if self.scene is None:
+            return
+
+        import random
+
+        random.seed(123)  # Consistent cloud placement
+
+        with self.scene:
+            from nicegui import ui
+
+            for _ in range(CLOUD_COUNT):
+                # Random cloud position
+                cloud_x = random.uniform(
+                    -yards_to_scene(CLOUD_SPREAD), yards_to_scene(CLOUD_SPREAD)
+                )
+                cloud_y = yards_to_scene(random.uniform(CLOUD_MIN_HEIGHT, CLOUD_MAX_HEIGHT))
+                cloud_z = random.uniform(50, yards_to_scene(TREELINE_START_DISTANCE))
+
+                # Create cloud as cluster of spheres (3-5 puffs per cloud)
+                num_puffs = random.randint(3, 5)
+                for _j in range(num_puffs):
+                    # Offset each puff from cloud center
+                    puff_x = cloud_x + random.uniform(-8, 8)
+                    puff_y = cloud_y + random.uniform(-2, 2)
+                    puff_z = cloud_z + random.uniform(-5, 5)
+                    puff_radius = random.uniform(4, 8)
+
+                    ui.scene.sphere(radius=puff_radius).material(CLOUD_COLOR).move(
+                        puff_x, puff_y, puff_z
+                    )
+
+    def _create_ground(self) -> None:
+        """Create the driving range ground plane with mowing stripes.
+
+        Creates a large flat green surface with alternating stripes
+        to simulate a mowed fairway pattern.
         """
         if self.scene is None:
             return
@@ -190,17 +263,116 @@ class RangeScene:
         with self.scene:
             from nicegui import ui
 
-            # Create ground as a flat box (thin plane)
-            # Three.js: width=X (lateral), height=Y (vertical), depth=Z (forward)
+            # Create striped fairway pattern
+            stripe_width = 10.0  # Width of each mowing stripe in yards
+            num_stripes = int(RANGE_WIDTH_YARDS / stripe_width)
+
+            for i in range(num_stripes):
+                stripe_x = -width / 2 + (i + 0.5) * yards_to_scene(stripe_width)
+                # Alternate between light and dark stripes
+                color = FAIRWAY_STRIPE_LIGHT if i % 2 == 0 else FAIRWAY_STRIPE_DARK
+
+                ui.scene.box(
+                    width=yards_to_scene(stripe_width),
+                    height=0.1,
+                    depth=length,
+                ).material(color).move(
+                    stripe_x,
+                    -0.05,
+                    length / 2,
+                )
+
+    def _create_tee_box(self) -> None:
+        """Create the tee box area where the ball sits.
+
+        Creates an elevated platform with a hitting mat on top,
+        positioned at the origin where shots are taken from.
+        """
+        if self.scene is None:
+            return
+
+        with self.scene:
+            from nicegui import ui
+
+            # Tee box platform (slightly elevated, darker green)
+            tee_width = yards_to_scene(TEE_BOX_WIDTH)
+            tee_depth = yards_to_scene(TEE_BOX_DEPTH)
+            tee_height = yards_to_scene(TEE_BOX_HEIGHT)
+
             ui.scene.box(
-                width=width,  # Lateral (X)
-                height=0.1,  # Thin (Y)
-                depth=length,  # Forward (Z)
-            ).material(GROUND_COLOR).move(
-                0,  # Centered laterally (X)
-                -0.05,  # Slightly below y=0
-                length / 2,  # Center at half length forward (Z)
+                width=tee_width,
+                height=tee_height,
+                depth=tee_depth,
+            ).material(TEE_BOX_COLOR).move(
+                0,  # Centered laterally
+                tee_height / 2,  # Raised above ground
+                -tee_depth / 2,  # Positioned behind origin (ball at front edge)
             )
+
+            # Hitting mat (lighter green, on top of tee box)
+            mat_width = yards_to_scene(TEE_MAT_WIDTH)
+            mat_depth = yards_to_scene(TEE_MAT_DEPTH)
+
+            ui.scene.box(
+                width=mat_width,
+                height=0.05,
+                depth=mat_depth,
+            ).material(TEE_MAT_COLOR).move(
+                0,  # Centered on tee box
+                tee_height + 0.025,  # On top of tee box
+                0,  # Centered at origin (where ball sits)
+            )
+
+    def _create_backdrop(self) -> None:
+        """Create the backdrop with a forest of pine trees.
+
+        Creates rows of cone-shaped trees at the far end of the range,
+        similar to the reference implementations.
+        """
+        if self.scene is None:
+            return
+
+        import random
+
+        # Use fixed seed for consistent tree placement
+        random.seed(42)
+
+        with self.scene:
+            from nicegui import ui
+
+            range_width = yards_to_scene(RANGE_WIDTH_YARDS)
+            start_z = yards_to_scene(TREELINE_START_DISTANCE)
+            row_spacing = yards_to_scene(TREELINE_DEPTH) / TREE_ROWS
+
+            # Create multiple rows of trees
+            for row in range(TREE_ROWS):
+                row_z = start_z + row * row_spacing
+
+                # Trees further back are taller (perspective effect)
+                height_scale = 1.0 + (row * 0.15)
+
+                for i in range(TREES_PER_ROW):
+                    # Distribute trees across the width with some randomness
+                    base_x = -range_width + (i * 2 * range_width / TREES_PER_ROW)
+                    x_offset = random.uniform(-8, 8)
+                    x = base_x + x_offset
+
+                    # Random height variation
+                    height = yards_to_scene(
+                        random.uniform(TREE_MIN_HEIGHT, TREE_MAX_HEIGHT) * height_scale
+                    )
+                    radius = yards_to_scene(TREE_BASE_RADIUS) * (height / 30)
+
+                    # Random z offset within row
+                    z_offset = random.uniform(-5, 5)
+                    z = row_z + z_offset
+
+                    # Create pine tree as a cone
+                    ui.scene.cylinder(
+                        top_radius=0,  # Point at top = cone
+                        bottom_radius=radius,
+                        height=height,
+                    ).material(TREE_COLOR).move(x, height / 2, z)
 
     def _create_distance_markers(self) -> None:
         """Add distance markers at standard intervals.
@@ -296,7 +468,9 @@ class RangeScene:
 
             # Golf ball radius ~0.85 inches = ~0.024 yards
             # Use larger size for visibility in scene
-            self.ball = ui.scene.sphere(radius=0.5).material(BALL_COLOR).move(0, 0.5, 0)
+            # Ball sits on top of tee box + mat
+            ball_y = yards_to_scene(TEE_BOX_HEIGHT) + 0.05 + 0.5  # tee height + mat + ball radius
+            self.ball = ui.scene.sphere(radius=0.5).material(BALL_COLOR).move(0, ball_y, 0)
 
     def _setup_camera(self) -> None:
         """Set initial camera position behind ball.
@@ -376,8 +550,9 @@ class RangeScene:
         pass
 
     def reset_ball(self) -> None:
-        """Reset ball to starting position."""
-        self.update_ball_position(Vec3(x=0.0, y=0.5, z=0.0))
+        """Reset ball to starting position on tee box."""
+        ball_y = yards_to_scene(TEE_BOX_HEIGHT) + 0.05 + 0.5  # tee height + mat + ball radius
+        self.update_ball_position(Vec3(x=0.0, y=ball_y, z=0.0))
 
     @property
     def camera_position(self) -> Vec3:
