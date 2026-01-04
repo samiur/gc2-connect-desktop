@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 try:
     import usb.backend.libusb1
@@ -37,11 +39,63 @@ USB_DISCONNECT_ERRORS = (
     "resource busy",
 )
 
+# Spin wait timeout in seconds
+# If we have basic shot data but no spin after this time, accept the shot anyway
+# The GC2 typically sends complete data ~1000ms after contact
+# We wait a bit longer in case of delays
+SPIN_WAIT_TIMEOUT_SEC = 1.5
+
+# USB packet queue size - should be large enough to buffer burst of packets
+USB_PACKET_QUEUE_SIZE = 100
+
+
+@dataclass
+class USBPacket:
+    """A USB packet received from the GC2."""
+
+    endpoint_name: str
+    data: bytes
+    timestamp: float
+
+
+class PacketSource(Protocol):
+    """Protocol for USB packet sources.
+
+    Both real USB and simulated sources can implement this interface,
+    allowing GC2USBReader to work with either.
+
+    This enables testing the packet processing logic without actual USB hardware.
+    """
+
+    async def get_packet(self, timeout: float) -> USBPacket | None:
+        """Get next packet, or None on timeout/end of stream."""
+        ...
+
+    def stop(self) -> None:
+        """Signal the packet source to stop."""
+        ...
+
+    @property
+    def is_active(self) -> bool:
+        """Whether the source is still active."""
+        ...
+
 
 class GC2USBReader:
-    """Handles USB communication with the GC2 launch monitor."""
+    """Handles USB communication with the GC2 launch monitor.
 
-    def __init__(self) -> None:
+    Can optionally accept a PacketSource for testing without USB hardware.
+    When a packet_source is provided, it will be used instead of reading
+    from the actual USB device.
+    """
+
+    def __init__(self, packet_source: PacketSource | None = None) -> None:
+        """Initialize the USB reader.
+
+        Args:
+            packet_source: Optional packet source for testing. When provided,
+                packets are read from this source instead of USB hardware.
+        """
         self.dev: Any = None
         self.endpoint_in: Any = None  # BULK IN for data
         self.endpoint_out: Any = None  # BULK OUT for commands
@@ -53,6 +107,12 @@ class GC2USBReader:
         self._status_callbacks: list[Callable[[GC2BallStatus], None]] = []
         self._disconnect_callbacks: list[Callable[[], None]] = []
         self._last_status: GC2BallStatus | None = None
+        self._packet_source = packet_source
+        # Queue for decoupling USB reads from packet processing
+        # This ensures we don't miss packets while processing
+        self._packet_queue: asyncio.Queue[USBPacket | None] = asyncio.Queue(
+            maxsize=USB_PACKET_QUEUE_SIZE
+        )
 
     @property
     def is_connected(self) -> bool:
@@ -309,6 +369,87 @@ class GC2USBReader:
         has_total_spin = "SPIN_RPM=" in msg
         return has_shot_id and has_speed and has_total_spin
 
+    def _has_basic_shot_data(self, accumulator: dict[str, str]) -> bool:
+        """Check if accumulator has enough data for a basic shot (maybe without spin).
+
+        Requires at minimum SHOT_ID and SPEED_MPH. ELEVATION_DEG is preferred
+        but can be estimated if missing (for interrupted transmissions).
+        """
+        return "SHOT_ID" in accumulator and "SPEED_MPH" in accumulator
+
+    def _has_spin_data(self, accumulator: dict[str, str]) -> bool:
+        """Check if accumulator has spin data."""
+        return "SPIN_RPM" in accumulator or "BACK_RPM" in accumulator
+
+    def _process_incomplete_shot(self, accumulator: dict[str, str]) -> bool:
+        """Process a shot that may be missing spin data or launch angle.
+
+        Sets default values for missing fields, validates basic fields,
+        and notifies callbacks. Bypasses normal spin validation since
+        incomplete shots don't have reliable spin data.
+
+        Args:
+            accumulator: Shot data dictionary.
+
+        Returns:
+            True if shot was processed successfully, False otherwise.
+        """
+        # Make a copy so we can modify it
+        data = accumulator.copy()
+
+        # Set default launch angle if missing
+        # Use 20 degrees as a reasonable estimate for iron shots
+        if "ELEVATION_DEG" not in data:
+            data["ELEVATION_DEG"] = "20.0"  # Typical iron shot launch angle
+        if "AZIMUTH_DEG" not in data:
+            data["AZIMUTH_DEG"] = "0.0"  # Straight shot
+
+        # Set default spin values if missing
+        # Use small non-zero values to pass validation (zero spin is rejected as misread)
+        if "SPIN_RPM" not in data:
+            data["SPIN_RPM"] = "1"  # Non-zero to pass validation
+        if "BACK_RPM" not in data:
+            data["BACK_RPM"] = "1"  # Non-zero to pass validation
+        if "SIDE_RPM" not in data:
+            data["SIDE_RPM"] = "0"  # Side spin of 0 is common
+
+        shot_id_str = data.get("SHOT_ID", "0")
+        shot_id_int = int(float(shot_id_str))
+
+        # Check if this is a new shot
+        if shot_id_int == self.last_shot_id:
+            return False  # Already processed this shot
+
+        # Track what fields were estimated
+        estimated_fields = []
+        if "ELEVATION_DEG" not in accumulator:
+            estimated_fields.append("launch")
+        if "SPIN_RPM" not in accumulator:
+            estimated_fields.append("spin")
+
+        logger.info(f"Processing incomplete shot data: {data}")
+
+        shot = GC2ShotData.from_gc2_dict(data)
+
+        # For incomplete shots, only check basic validity (speed range)
+        # Skip spin validation since we don't have reliable spin data
+        speed_valid = 0 < shot.ball_speed <= 250
+        not_error_code = shot.back_spin != 2222.0
+
+        if speed_valid and not_error_code:
+            self.last_shot_id = shot_id_int
+            estimated_str = ", ".join(estimated_fields) if estimated_fields else "spin"
+            logger.warning(
+                f"Shot #{shot.shot_id}: {shot.ball_speed:.1f} mph, "
+                f"launch={shot.launch_angle:.1f}° "
+                f"(INCOMPLETE - {estimated_str} estimated)"
+            )
+            self._notify_shot(shot)
+            return True
+        else:
+            logger.warning(f"Invalid shot data rejected: {data}")
+            return False
+
     def _extract_shot_message(self, buffer: str) -> tuple[str | None, str]:
         """
         Extract a complete 0H shot message from the buffer.
@@ -419,8 +560,14 @@ class GC2USBReader:
             (accumulator, remaining_buffer) - remaining_buffer contains any
             incomplete line at the end of the current packet
         """
-        # Prepend any incomplete line from previous packet
-        full_text = line_buffer + text
+        # If this packet starts a new message (0H or 0M header), discard
+        # the old line buffer as it's from a previous incomplete message.
+        # This prevents corruption like "SPEED_MPH=40.0H\nSHOT_ID=..."
+        if text.startswith("0H\n") or text.startswith("0M\n"):
+            full_text = text
+        else:
+            # Continuation packet - prepend incomplete line from previous packet
+            full_text = line_buffer + text
 
         # Split into lines - lines ending with \n are complete
         lines = full_text.split("\n")
@@ -442,214 +589,447 @@ class GC2USBReader:
 
         return accumulator, remaining
 
-    async def read_loop(self, timeout: int = 1000) -> None:
-        """Async read loop - reads shots from USB and calls callbacks."""
-        if not self.endpoint_in and not self.endpoint_intr:
-            logger.error("Not connected - no endpoints!")
-            return
+    async def _usb_reader_task(self, endpoints: list[tuple[str, Any]]) -> None:
+        """Task that continuously reads USB packets into the queue.
 
-        self._running = True
-        shot_accumulator: dict[str, str] = {}  # Accumulate fields across packets
-        line_buffer = ""  # Buffer for incomplete lines split across packets
-        timeout_count = 0
-
-        logger.info("Starting GC2 read loop...")
-
-        # Determine which endpoints to read from
-        endpoints_to_try = []
-        if self.endpoint_intr:
-            endpoints_to_try.append(("INTR", self.endpoint_intr))
-        if self.endpoint_in:
-            endpoints_to_try.append(("BULK", self.endpoint_in))
-
-        for ep_name, ep in endpoints_to_try:
-            logger.info(f"Will monitor {ep_name} endpoint: 0x{ep.bEndpointAddress:02X}")
-
-        logger.info("Listening for shots...")
+        This runs independently of packet processing to ensure we never
+        miss packets while processing previous ones.
+        """
+        logger.info("USB reader task started")
 
         while self._running:
-            # Try reading from all endpoints
-            for ep_name, ep in endpoints_to_try:
-                # Drain all available packets from this endpoint before moving on
-                # This prevents missing rapidly-arriving packets
-                packets_read = 0
-                while True:
+            for ep_name, ep in endpoints:
+                # Drain all available packets from this endpoint
+                while self._running:
                     try:
-                        # Read from USB endpoint (run in thread pool to avoid blocking)
-                        def read_endpoint(endpoint: Any = ep) -> Any:
-                            return self.dev.read(
+
+                        def read_endpoint(endpoint: Any = ep) -> bytes:
+                            result = self.dev.read(
                                 endpoint.bEndpointAddress,
                                 endpoint.wMaxPacketSize,
-                                timeout=50,  # Shorter timeout to drain buffer quickly
+                                timeout=5,  # Very short timeout for fast cycling
                             )
+                            return bytes(result)
 
                         data = await asyncio.get_event_loop().run_in_executor(
                             None,
                             read_endpoint,
                         )
 
-                        packets_read += 1
-                        timeout_count = 0
-
-                        # Convert to string
-                        text = "".join(chr(x) for x in data if x != 0)
-
-                        # Log ALL received data for debugging
-                        # Shot-relevant packets at INFO, others at DEBUG
-                        is_shot_data = (
-                            "SHOT_ID" in text
-                            or "SPIN_RPM" in text
-                            or "BACK_RPM" in text
-                            or "SIDE_RPM" in text
+                        # Queue the packet immediately - don't process here
+                        packet = USBPacket(
+                            endpoint_name=ep_name,
+                            data=data,
+                            timestamp=time.monotonic(),
                         )
-                        is_tracking = "0M" in text
-                        ends_with_terminator = text.endswith("\n\t") or text.endswith("\t")
-
-                        if is_shot_data:
-                            logger.info(
-                                f"USB RX [{ep_name}] ({len(data)} bytes) [term={ends_with_terminator}]: {text!r}"
-                            )
-                        elif is_tracking:
-                            logger.debug(f"USB RX [{ep_name}] 0M tracking: {text!r}")
-                        else:
-                            # Log ALL other packets so we can see what's being received
-                            logger.info(
-                                f"USB RX [{ep_name}] ({len(data)} bytes) [term={ends_with_terminator}] OTHER: {text!r}"
-                            )
-
-                        # Debug: log line buffer state when processing shot data
-                        if is_shot_data and line_buffer:
-                            logger.debug(f"Line buffer before parse: {line_buffer!r}")
-
-                        # Handle 0M (ball tracking) messages separately from shot data
-                        if "0M" in text:
-                            # Parse 0M message for ball status
-                            status_accumulator: dict[str, str] = {}
-                            status_accumulator, _ = self._parse_gc2_fields(
-                                text, status_accumulator, ""
-                            )
-
-                            if status_accumulator:
-                                new_status = GC2BallStatus.from_gc2_dict(status_accumulator)
-
-                                # Only notify if status actually changed
-                                status_changed = (
-                                    self._last_status is None
-                                    or self._last_status.flags != new_status.flags
-                                    or self._last_status.ball_count != new_status.ball_count
-                                )
-
-                                if status_changed:
-                                    ready_str = "READY" if new_status.is_ready else "NOT READY"
-                                    ball_str = (
-                                        f"{new_status.ball_count} ball(s)"
-                                        if new_status.ball_detected
-                                        else "no ball"
-                                    )
-                                    logger.info(
-                                        f"GC2 Status: {ready_str}, {ball_str} "
-                                        f"(FLAGS={new_status.flags}, pos={new_status.ball_position})"
-                                    )
-                                    self._last_status = new_status
-                                    self._notify_status(new_status)
-
-                            # Don't accumulate 0M fields into shot data
-                            continue
-
-                        # Check if this is a new shot ID - if so, clear stale data
-                        if "0H" in text and "SHOT_ID" in text:
-                            # Extract the new shot ID from the text
-                            for line in text.split("\n"):
-                                if "SHOT_ID=" in line:
-                                    new_id = line.split("=")[1].strip()
-                                    old_id = shot_accumulator.get("SHOT_ID")
-                                    if old_id and old_id != new_id:
-                                        logger.warning(
-                                            f"Incomplete shot #{old_id} discarded "
-                                            f"(had: {list(shot_accumulator.keys())})"
-                                        )
-                                        shot_accumulator.clear()
-                                        line_buffer = ""
-                                    break
-
-                        shot_accumulator, line_buffer = self._parse_gc2_fields(
-                            text, shot_accumulator, line_buffer
-                        )
-
-                        # Debug: show accumulator state after parsing shot data
-                        if is_shot_data:
-                            logger.debug(
-                                f"Accumulator after parse: {list(shot_accumulator.keys())}"
-                            )
-                            if line_buffer:
-                                logger.debug(f"Line buffer after parse: {line_buffer!r}")
-
-                        # Check if message is complete (ends with \n\t)
-                        # GC2 messages terminate with \n\t as the final delimiter
-                        message_complete = text.endswith("\n\t") or text.endswith("\t")
-
-                        if message_complete:
-                            # Check if we have shot data to process
-                            current_shot_id = shot_accumulator.get("SHOT_ID")
-                            has_speed = "SPEED_MPH" in shot_accumulator
-                            has_total_spin = "SPIN_RPM" in shot_accumulator
-
-                            if current_shot_id and has_speed and has_total_spin:
-                                shot_id_int = int(float(current_shot_id))
-
-                                # Check if this is a new shot (different ID from last processed)
-                                if shot_id_int != self.last_shot_id:
-                                    logger.info(f"Complete shot data: {shot_accumulator}")
-
-                                    shot = GC2ShotData.from_gc2_dict(shot_accumulator)
-                                    if shot.is_valid():
-                                        self.last_shot_id = shot_id_int
-                                        spin_info = f"spin={shot.total_spin:.0f}"
-                                        if shot.back_spin or shot.side_spin:
-                                            spin_info += f" (back={shot.back_spin:.0f}, side={shot.side_spin:.0f}, axis={shot.spin_axis:.1f}°)"
-                                        else:
-                                            spin_info += " (no spin components from device)"
-                                        logger.info(
-                                            f"Shot #{shot.shot_id}: {shot.ball_speed:.1f} mph, "
-                                            f"{spin_info}, launch={shot.launch_angle:.1f}°"
-                                        )
-                                        self._notify_shot(shot)
-
-                                    else:
-                                        logger.warning(
-                                            f"Invalid shot data rejected: {shot_accumulator}"
-                                        )
-
-                                    # Clear accumulator for next shot
-                                    shot_accumulator.clear()
-                                    line_buffer = ""  # Also clear line buffer
+                        try:
+                            self._packet_queue.put_nowait(packet)
+                        except asyncio.QueueFull:
+                            logger.warning("USB packet queue full - dropping packet!")
 
                     except usb.core.USBTimeoutError:
-                        # No more data on this endpoint - move to next endpoint
+                        # No more data on this endpoint - try next
                         break
                     except usb.core.USBError as e:
                         if "timeout" not in str(e).lower():
                             logger.error(f"USB read error on {ep_name}: {e}")
-                            # Check if this indicates a disconnection
                             if self._is_disconnect_error(e):
                                 logger.error("GC2 USB disconnection detected!")
                                 self._connected = False
                                 self._running = False
+                                # Signal processor to stop
+                                await self._packet_queue.put(None)
                                 self._notify_disconnect()
-                                return  # Exit the read loop
+                                return
                         break
 
-            # Count timeouts for logging
-            timeout_count += 1
-            if timeout_count % 100 == 0 and shot_accumulator:
-                logger.debug(
-                    f"Waiting for GC2 data... (accumulated fields: {list(shot_accumulator.keys())})"
+            # Small yield to prevent busy-waiting
+            await asyncio.sleep(0.001)
+
+        # Signal processor task to stop
+        await self._packet_queue.put(None)
+        logger.info("USB reader task stopped")
+
+    async def _simulated_reader_task(self) -> None:
+        """Task that reads from a simulated packet source into the queue.
+
+        Used when a packet_source is injected for testing.
+        """
+        if not self._packet_source:
+            logger.error("No packet source configured for simulated reader")
+            await self._packet_queue.put(None)
+            return
+
+        logger.info("Simulated reader task started")
+
+        while self._running and self._packet_source.is_active:
+            try:
+                # Get packet from simulated source
+                packet = await self._packet_source.get_packet(timeout=0.1)
+
+                if packet is None:
+                    # No packet available or source exhausted
+                    if not self._packet_source.is_active:
+                        break
+                    continue
+
+                # Convert to our USBPacket type if needed (duck typing)
+                usb_packet = USBPacket(
+                    endpoint_name=packet.endpoint_name,
+                    data=packet.data,
+                    timestamp=packet.timestamp,
                 )
 
-            try:
-                await asyncio.sleep(0.01)
-            except asyncio.CancelledError:
+                try:
+                    self._packet_queue.put_nowait(usb_packet)
+                except asyncio.QueueFull:
+                    logger.warning("USB packet queue full - dropping packet!")
+
+            except Exception as e:
+                logger.error(f"Simulated reader error: {e}")
                 break
+
+        # Signal processor task to stop
+        await self._packet_queue.put(None)
+        logger.info("Simulated reader task stopped")
+
+    async def read_loop(self, timeout: int = 1000) -> None:
+        """Async read loop - reads shots from USB and calls callbacks.
+
+        Uses a producer-consumer pattern: a separate task reads USB packets
+        into a queue, while this loop processes them. This ensures we never
+        miss packets while processing.
+
+        When a packet_source is configured, packets are read from the simulated
+        source instead of USB hardware.
+        """
+        # Check if using simulated or real USB source
+        using_simulation = self._packet_source is not None
+
+        if not using_simulation and not self.endpoint_in and not self.endpoint_intr:
+            logger.error("Not connected - no endpoints!")
+            return
+
+        self._running = True
+        shot_accumulator: dict[str, str] = {}  # Accumulate fields across packets
+        line_buffer = ""  # Buffer for incomplete lines split across packets
+        shot_start_time: float | None = None  # When we first received data for current shot
+
+        if using_simulation:
+            logger.info("Starting GC2 read loop (SIMULATED)...")
+            # Start the simulated reader task
+            reader_task = asyncio.create_task(self._simulated_reader_task())
+        else:
+            logger.info("Starting GC2 read loop...")
+
+            # Determine which endpoints to read from
+            endpoints_to_try = []
+            if self.endpoint_intr:
+                endpoints_to_try.append(("INTR", self.endpoint_intr))
+            if self.endpoint_in:
+                endpoints_to_try.append(("BULK", self.endpoint_in))
+
+            for ep_name, ep in endpoints_to_try:
+                logger.info(f"Will monitor {ep_name} endpoint: 0x{ep.bEndpointAddress:02X}")
+
+            # Start the USB reader task
+            reader_task = asyncio.create_task(self._usb_reader_task(endpoints_to_try))
+
+        logger.info("Listening for shots...")
+
+        try:
+            while self._running:
+                # Get packet from queue with timeout
+                try:
+                    packet = await asyncio.wait_for(
+                        self._packet_queue.get(),
+                        timeout=0.1,  # 100ms timeout for checking _running flag
+                    )
+                except asyncio.TimeoutError:
+                    # Check spin wait timeout
+                    if (
+                        shot_start_time is not None
+                        and self._has_basic_shot_data(shot_accumulator)
+                        and not self._has_spin_data(shot_accumulator)
+                    ):
+                        elapsed = time.monotonic() - shot_start_time
+                        if elapsed >= SPIN_WAIT_TIMEOUT_SEC:
+                            shot_id = shot_accumulator.get("SHOT_ID", "?")
+                            logger.warning(
+                                f"Shot #{shot_id}: spin data timeout after {elapsed:.1f}s - "
+                                f"processing with estimated spin"
+                            )
+                            if self._process_incomplete_shot(shot_accumulator):
+                                shot_accumulator.clear()
+                                line_buffer = ""
+                                shot_start_time = None
+                    continue
+
+                # None signals end of stream
+                if packet is None:
+                    break
+
+                ep_name = packet.endpoint_name
+                data = packet.data
+
+                # Convert to string
+                text = "".join(chr(x) for x in data if x != 0)
+
+                # Log ALL received data for debugging
+                # Shot-relevant packets at INFO, others at DEBUG
+                is_shot_data = (
+                    "SHOT_ID" in text
+                    or "SPIN_RPM" in text
+                    or "BACK_RPM" in text
+                    or "SIDE_RPM" in text
+                )
+                is_tracking = "0M" in text
+                ends_with_terminator = text.endswith("\n\t") or text.endswith("\t")
+
+                if is_shot_data:
+                    logger.info(
+                        f"USB RX [{ep_name}] ({len(data)} bytes) [term={ends_with_terminator}]: {text!r}"
+                    )
+                elif is_tracking:
+                    logger.debug(f"USB RX [{ep_name}] 0M tracking: {text!r}")
+                else:
+                    # Log ALL other packets so we can see what's being received
+                    logger.info(
+                        f"USB RX [{ep_name}] ({len(data)} bytes) [term={ends_with_terminator}] OTHER: {text!r}"
+                    )
+
+                # Debug: log line buffer state when processing shot data
+                if is_shot_data and line_buffer:
+                    logger.debug(f"Line buffer before parse: {line_buffer!r}")
+
+                # Handle 0M (ball tracking) messages separately from shot data
+                if "0M" in text:
+                    # Parse 0M message for ball status
+                    status_accumulator: dict[str, str] = {}
+                    status_accumulator, _ = self._parse_gc2_fields(text, status_accumulator, "")
+
+                    if status_accumulator:
+                        new_status = GC2BallStatus.from_gc2_dict(status_accumulator)
+
+                        # Only notify if status actually changed
+                        status_changed = (
+                            self._last_status is None
+                            or self._last_status.flags != new_status.flags
+                            or self._last_status.ball_count != new_status.ball_count
+                        )
+
+                        if status_changed:
+                            ready_str = "READY" if new_status.is_ready else "NOT READY"
+                            ball_str = (
+                                f"{new_status.ball_count} ball(s)"
+                                if new_status.ball_detected
+                                else "no ball"
+                            )
+                            logger.info(
+                                f"GC2 Status: {ready_str}, {ball_str} "
+                                f"(FLAGS={new_status.flags}, pos={new_status.ball_position})"
+                            )
+                            self._last_status = new_status
+                            self._notify_status(new_status)
+
+                    # Check if we have incomplete shot data that was interrupted
+                    # by this status message. The GC2 sometimes abandons shot data
+                    # transmission mid-stream when ball status changes.
+                    if shot_accumulator and "SHOT_ID" in shot_accumulator:
+                        shot_id = shot_accumulator.get("SHOT_ID", "?")
+                        # Check if this shot was already processed
+                        shot_id_int = int(float(shot_id)) if shot_id != "?" else 0
+                        if shot_id_int != self.last_shot_id:
+                            # Flush any incomplete line from line_buffer before salvaging
+                            # The last value (like "SPEED_MPH=48.") may be stuck there
+                            if line_buffer and "=" in line_buffer:
+                                key, value = line_buffer.split("=", 1)
+                                key = key.strip()
+                                value = value.strip()
+                                if key and value:
+                                    shot_accumulator[key] = value
+                                    logger.debug(
+                                        f"Flushed incomplete line to accumulator: {key}={value}"
+                                    )
+
+                            if self._has_basic_shot_data(shot_accumulator):
+                                # Try to salvage with what we have
+                                logger.warning(
+                                    f"Shot #{shot_id} interrupted by status change "
+                                    f"- processing with available data"
+                                )
+                                self._process_incomplete_shot(shot_accumulator)
+                            else:
+                                # Not enough data to salvage
+                                logger.warning(
+                                    f"Shot #{shot_id} interrupted by status change "
+                                    f"- discarding incomplete data: "
+                                    f"{list(shot_accumulator.keys())}"
+                                )
+                        # Clear the accumulator either way to prevent stale data
+                        shot_accumulator.clear()
+                        line_buffer = ""
+                        shot_start_time = None
+
+                    # Don't accumulate 0M fields into shot data
+                    continue
+
+                # Check if this is a new shot ID or new message - if so, clear stale data
+                if "0H" in text and "SHOT_ID" in text:
+                    # Extract shot ID and MSEC from the new message
+                    new_id = None
+                    new_msec = None
+                    for line in text.split("\n"):
+                        if "SHOT_ID=" in line:
+                            new_id = line.split("=")[1].strip()
+                        elif "MSEC_SINCE_CONTACT=" in line:
+                            new_msec = line.split("=")[1].strip()
+
+                    if new_id:
+                        new_id_int = int(float(new_id))
+                        old_id = shot_accumulator.get("SHOT_ID")
+                        old_msec = shot_accumulator.get("MSEC_SINCE_CONTACT")
+
+                        # Skip data for shots we've already processed
+                        # This prevents stale "update" packets from corrupting the accumulator
+                        if new_id_int == self.last_shot_id:
+                            logger.debug(f"Ignoring update for already-processed shot #{new_id}")
+                            # Clear any partial data and skip this packet
+                            shot_accumulator.clear()
+                            line_buffer = ""
+                            shot_start_time = None
+                            continue
+
+                        # Check if this is a new message (different shot ID or
+                        # significantly different MSEC_SINCE_CONTACT indicating
+                        # a new transmission for the same shot)
+                        is_new_shot = old_id and old_id != new_id
+                        is_new_message = False
+                        if old_id == new_id and old_msec and new_msec:
+                            try:
+                                msec_diff = abs(int(float(new_msec)) - int(float(old_msec)))
+                                # If MSEC changed by more than 100ms, it's a new message
+                                is_new_message = msec_diff > 100
+                            except ValueError:
+                                pass
+
+                        if is_new_shot or is_new_message:
+                            # Check if old data was preliminary (MSEC < 500)
+                            # If refined data is now arriving, don't salvage preliminary -
+                            # just discard it and use the refined data instead
+                            old_msec_int = int(float(old_msec)) if old_msec else 0
+                            is_preliminary_being_replaced = is_new_message and old_msec_int < 500
+
+                            if is_preliminary_being_replaced:
+                                # Refined data replacing preliminary - just discard
+                                logger.debug(
+                                    f"Replacing preliminary data (MSEC={old_msec}) "
+                                    f"with refined (MSEC={new_msec}) for shot #{old_id}"
+                                )
+                            else:
+                                # Flush line_buffer before salvaging
+                                if line_buffer and "=" in line_buffer:
+                                    key, value = line_buffer.split("=", 1)
+                                    key = key.strip()
+                                    value = value.strip()
+                                    if key and value:
+                                        shot_accumulator[key] = value
+
+                                # Before discarding, check if old shot can be salvaged
+                                if self._has_basic_shot_data(shot_accumulator):
+                                    reason = (
+                                        "new shot arrived" if is_new_shot else "new message arrived"
+                                    )
+                                    logger.warning(
+                                        f"Shot #{old_id} incomplete ({reason}) - processing anyway"
+                                    )
+                                    self._process_incomplete_shot(shot_accumulator)
+                                else:
+                                    logger.warning(
+                                        f"Incomplete shot #{old_id} discarded "
+                                        f"(had: {list(shot_accumulator.keys())})"
+                                    )
+                            shot_accumulator.clear()
+                            line_buffer = ""
+
+                        # Track start time for new shot/message
+                        if not old_id or old_id != new_id or is_new_message:
+                            shot_start_time = time.monotonic()
+
+                # Only accumulate if we didn't break out of the loop above
+                if (
+                    not shot_accumulator.get("SHOT_ID")
+                    or int(float(shot_accumulator.get("SHOT_ID", "0"))) != self.last_shot_id
+                ):
+                    shot_accumulator, line_buffer = self._parse_gc2_fields(
+                        text, shot_accumulator, line_buffer
+                    )
+
+                # Debug: show accumulator state after parsing shot data
+                if is_shot_data:
+                    logger.debug(f"Accumulator after parse: {list(shot_accumulator.keys())}")
+                    if line_buffer:
+                        logger.debug(f"Line buffer after parse: {line_buffer!r}")
+
+                # Check if message is complete (ends with \n\t)
+                # GC2 messages terminate with \n\t as the final delimiter
+                message_complete = text.endswith("\n\t") or text.endswith("\t")
+
+                if message_complete:
+                    # Check if we have shot data to process
+                    current_shot_id = shot_accumulator.get("SHOT_ID")
+                    has_speed = "SPEED_MPH" in shot_accumulator
+                    has_total_spin = "SPIN_RPM" in shot_accumulator
+
+                    if current_shot_id and has_speed and has_total_spin:
+                        shot_id_int = int(float(current_shot_id))
+
+                        # Check MSEC_SINCE_CONTACT - skip preliminary data (< 500ms)
+                        # and wait for refined data which has more accurate spin
+                        msec_str = shot_accumulator.get("MSEC_SINCE_CONTACT", "0")
+                        msec_int = int(float(msec_str))
+                        if msec_int < 500:
+                            logger.info(
+                                f"Preliminary data for shot #{current_shot_id} complete "
+                                f"(MSEC={msec_int}) - waiting for refined data"
+                            )
+                            # Don't clear accumulator - wait for refined
+                            # But DO continue to next packet read
+                            continue
+
+                        # Check if this is a new shot (different ID from last processed)
+                        if shot_id_int != self.last_shot_id:
+                            logger.info(f"Complete shot data: {shot_accumulator}")
+
+                            shot = GC2ShotData.from_gc2_dict(shot_accumulator)
+                            if shot.is_valid():
+                                self.last_shot_id = shot_id_int
+                                spin_info = f"spin={shot.total_spin:.0f}"
+                                if shot.back_spin or shot.side_spin:
+                                    spin_info += f" (back={shot.back_spin:.0f}, side={shot.side_spin:.0f}, axis={shot.spin_axis:.1f}°)"
+                                else:
+                                    spin_info += " (no spin components from device)"
+                                logger.info(
+                                    f"Shot #{shot.shot_id}: {shot.ball_speed:.1f} mph, "
+                                    f"{spin_info}, launch={shot.launch_angle:.1f}°"
+                                )
+                                self._notify_shot(shot)
+
+                            else:
+                                logger.warning(f"Invalid shot data rejected: {shot_accumulator}")
+
+                            # Clear accumulator for next shot
+                            shot_accumulator.clear()
+                            line_buffer = ""  # Also clear line buffer
+                            shot_start_time = None  # Reset start time
+
+        finally:
+            # Clean up the reader task
+            reader_task.cancel()
+            try:
+                await reader_task
+            except asyncio.CancelledError:
+                pass
 
         self._running = False
         logger.info("GC2 read loop stopped")

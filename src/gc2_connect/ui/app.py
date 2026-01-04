@@ -18,8 +18,13 @@ from gc2_connect.config.settings import Settings, get_settings_path
 from gc2_connect.gc2.usb_reader import GC2USBReader, MockGC2Reader
 from gc2_connect.gspro.client import GSProClient
 from gc2_connect.models import GC2BallStatus, GC2ShotData
+from gc2_connect.open_range.engine import OpenRangeEngine
+from gc2_connect.open_range.models import Conditions, ShotResult
 from gc2_connect.services.export import export_to_csv, generate_export_filename
 from gc2_connect.services.history import ShotHistoryManager
+from gc2_connect.services.shot_router import AppMode, ShotRouter
+from gc2_connect.ui.components.mode_selector import ModeSelector
+from gc2_connect.ui.components.open_range_view import OpenRangeView
 from gc2_connect.utils.reconnect import ReconnectionManager, ReconnectionState
 
 # Configure logging (set GC2_DEBUG=1 for verbose USB debugging)
@@ -43,6 +48,26 @@ class GC2ConnectApp:
         self.auto_send = True
         self.use_mock_gc2 = self.settings.gc2.use_mock
 
+        # Shot router and Open Range components
+        self.shot_router = ShotRouter()
+        self.open_range_engine = OpenRangeEngine(
+            conditions=Conditions(
+                temp_f=self.settings.open_range.conditions.temp_f,
+                elevation_ft=self.settings.open_range.conditions.elevation_ft,
+                humidity_pct=self.settings.open_range.conditions.humidity_pct,
+                wind_speed_mph=self.settings.open_range.conditions.wind_speed_mph,
+                wind_dir_deg=self.settings.open_range.conditions.wind_dir_deg,
+            ),
+            surface=self.settings.open_range.surface,
+        )
+        self.shot_router.set_open_range_engine(self.open_range_engine)
+        self.shot_router.on_mode_change(self._on_mode_change)
+        self.shot_router.on_shot_result(self._on_open_range_result)
+
+        # UI component instances
+        self.mode_selector: ModeSelector | None = None
+        self.open_range_view: OpenRangeView | None = None
+
         # UI references (typed as Any due to NiceGUI's dynamic nature)
         self.gc2_status_label: Any = None
         self.gc2_ready_indicator: Any = None
@@ -57,6 +82,13 @@ class GC2ConnectApp:
         self.history_count_label: Any = None
         self.stats_avg_speed_label: Any = None
         self.stats_avg_spin_label: Any = None
+
+        # Container references for mode-specific visibility
+        self._gspro_panel: Any = None
+        self._open_range_container: Any = None
+        self._gspro_content_column: Any = None
+        self._open_range_placeholder: Any = None
+        self._open_range_built = False
 
         # Ball status state
         self.send_status_to_gspro = True
@@ -284,24 +316,57 @@ class GC2ConnectApp:
         with ui.header().classes("bg-blue-900"):
             ui.label("GC2 Connect").classes("text-2xl font-bold")
             ui.space()
+
+            # Mode selector in header
+            self.mode_selector = ModeSelector(
+                on_change=self._handle_mode_selector_change,
+                initial_mode=AppMode(self.settings.mode),
+            )
+            self.mode_selector.build()
+
+            ui.space()
             with ui.row().classes("items-center"):
-                ui.label("Auto-send to GSPro:")
+                ui.label("Auto-send:").classes("text-sm")
                 ui.switch(value=True, on_change=lambda e: setattr(self, "auto_send", e.value))
 
+        # Main content area
         with ui.row().classes("w-full gap-4 p-4"):
-            # Left column - Connections
-            with ui.column().classes("w-1/3"):
+            # Left column - GC2 Connection (always visible)
+            with ui.column().classes("w-64 flex-shrink-0"):
                 self._build_gc2_panel()
-                self._build_gspro_panel()
                 self._build_settings_panel()
 
-            # Center column - Current Shot
-            with ui.column().classes("w-1/3"):
-                self._build_shot_display()
+            # GSPro mode content
+            with ui.column().classes("flex-grow") as gspro_content:
+                self._gspro_content_column = gspro_content
+                with ui.row().classes("w-full gap-4"):
+                    # GSPro connection panel
+                    with ui.column().classes("w-72"):
+                        self._build_gspro_panel()
 
-            # Right column - Shot History
-            with ui.column().classes("w-1/3"):
-                self._build_history_panel()
+                    # Center column - Current Shot
+                    with ui.column().classes("flex-grow"):
+                        self._build_shot_display()
+
+                    # Right column - Shot History
+                    with ui.column().classes("w-80"):
+                        self._build_history_panel()
+
+            # Open Range mode content (initially hidden)
+            # Note: We defer building the OpenRangeView until mode is switched
+            # because Three.js scenes don't initialize in hidden containers
+            with ui.column().classes("flex-grow hidden") as open_range_container:
+                self._open_range_container = open_range_container
+                # Placeholder - view will be built on first mode switch
+                self._open_range_placeholder = ui.label("").classes("hidden")
+
+        # Set initial mode visibility
+        initial_mode = AppMode(self.settings.mode)
+        if initial_mode == AppMode.OPEN_RANGE:
+            self._build_open_range_view_if_needed()
+            self._show_open_range_ui()
+        else:
+            self._show_gspro_ui()
 
     def _build_gc2_panel(self) -> None:
         """Build the GC2 connection panel."""
@@ -688,17 +753,33 @@ class GC2ConnectApp:
         """Handle a new shot from the GC2."""
         logger.info(f"Shot received: #{shot.shot_id}")
 
-        # Update UI (must be done in main thread)
-        self._update_shot_display(shot)
+        # Always update history regardless of mode
         self._add_to_history(shot)
 
-        # Send to GSPro if connected and auto-send enabled
-        if self.auto_send and self.gspro_client and self.gspro_client.is_connected:
-            response = self.gspro_client.send_shot(shot)
-            if response and response.is_success:
-                ui.notify(f"Shot #{shot.shot_id} sent to GSPro", type="positive")
+        # Route shot based on current mode
+        if self.auto_send:
+            # Create async task for shot routing
+            asyncio.create_task(self._route_shot(shot))
+
+    async def _route_shot(self, shot: GC2ShotData) -> None:
+        """Route shot to appropriate destination based on mode."""
+        try:
+            if self.shot_router.mode == AppMode.GSPRO:
+                # Update display for GSPro mode
+                self._update_shot_display(shot)
+
+                # Send to GSPro if connected
+                if self.gspro_client and self.gspro_client.is_connected:
+                    self.shot_router.set_gspro_client(self.gspro_client)
+                    await self.shot_router.route_shot(shot)
+                    logger.info(f"Shot #{shot.shot_id} sent to GSPro")
+                else:
+                    logger.warning("GSPro not connected - shot not sent")
             else:
-                ui.notify("Failed to send shot to GSPro", type="warning")
+                # Open Range mode - route to physics engine
+                await self.shot_router.route_shot(shot)
+        except Exception as e:
+            logger.error(f"Error routing shot: {e}")
 
     def _on_status_received(self, status: GC2BallStatus) -> None:
         """Handle ball status update from the GC2."""
@@ -731,6 +812,79 @@ class GC2ConnectApp:
             self.gc2_reader.send_test_shot()
         else:
             ui.notify("Enable Mock GC2 mode to send test shots", type="info")
+
+    # Mode switching methods
+
+    async def _handle_mode_selector_change(self, mode: AppMode) -> None:
+        """Handle mode change from ModeSelector UI component."""
+        # Update UI visibility first (while we have context)
+        if mode == AppMode.GSPRO:
+            self._show_gspro_ui()
+        else:
+            self._show_open_range_ui()
+
+        # Update router mode (this triggers _on_mode_change callback)
+        await self.shot_router.set_mode(mode)
+
+    async def _on_mode_change(self, mode: AppMode) -> None:
+        """Handle mode change from shot router (callback)."""
+        logger.info(f"Mode changed to: {mode.value}")
+
+        # Update settings (doesn't require UI context)
+        self.settings.mode = mode.value
+        self.save_settings()
+
+        # Note: UI visibility is handled in _handle_mode_selector_change
+        # to ensure we have proper NiceGUI context
+
+    async def _on_open_range_result(self, result: ShotResult) -> None:
+        """Handle shot result from Open Range simulation."""
+        logger.info(
+            f"Open Range result: carry={result.summary.carry_distance:.1f}yds, "
+            f"total={result.summary.total_distance:.1f}yds"
+        )
+
+        # Display the shot in Open Range view
+        if self.open_range_view is not None:
+            await self.open_range_view.show_shot(result)
+
+    def _build_open_range_view_if_needed(self) -> None:
+        """Build the Open Range view on first use.
+
+        Three.js scenes don't initialize properly in hidden containers,
+        so we defer building until the container is about to be shown.
+        """
+        if self._open_range_built:
+            return
+
+        if self._open_range_container is None:
+            return
+
+        logger.debug("Building Open Range view (first use)")
+
+        # Build the view inside the container
+        with self._open_range_container:
+            self.open_range_view = OpenRangeView()
+            self.open_range_view.build()
+
+        self._open_range_built = True
+
+    def _show_gspro_ui(self) -> None:
+        """Show GSPro mode UI, hide Open Range UI."""
+        if self._gspro_content_column is not None:
+            self._gspro_content_column.classes(remove="hidden")
+        if self._open_range_container is not None:
+            self._open_range_container.classes(add="hidden")
+
+    def _show_open_range_ui(self) -> None:
+        """Show Open Range mode UI, hide GSPro UI."""
+        # Build the view if this is the first time showing it
+        self._build_open_range_view_if_needed()
+
+        if self._gspro_content_column is not None:
+            self._gspro_content_column.classes(add="hidden")
+        if self._open_range_container is not None:
+            self._open_range_container.classes(remove="hidden")
 
     def shutdown(self) -> None:
         """Clean shutdown of all connections.
