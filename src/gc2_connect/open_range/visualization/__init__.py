@@ -15,7 +15,8 @@ from gc2_connect.open_range.visualization.ball_animation import (
     CAMERA_FOLLOW_DISTANCE,
     PHASE_COLORS,
     BallAnimator,
-    calculate_camera_position,
+    calculate_follow_camera,
+    get_tee_box_camera,
 )
 from gc2_connect.open_range.visualization.range_scene import (
     AMBIENT_LIGHT_INTENSITY,
@@ -50,5 +51,6 @@ __all__ = [
     "BallAnimator",
     "PHASE_COLORS",
     "CAMERA_FOLLOW_DISTANCE",
-    "calculate_camera_position",
+    "calculate_follow_camera",
+    "get_tee_box_camera",
 ]

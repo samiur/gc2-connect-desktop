@@ -264,31 +264,31 @@ class TestBallAnimator:
 class TestCameraPosition:
     """Tests for camera positioning utilities."""
 
-    def test_calculate_camera_position_at_start(self) -> None:
-        """Test camera position at ball start."""
+    def test_tee_box_camera_position(self) -> None:
+        """Test tee box camera is behind and above."""
         from gc2_connect.open_range.visualization.ball_animation import (
-            calculate_camera_position,
+            get_tee_box_camera,
         )
 
-        # Ball at origin (z=0)
-        camera_pos = calculate_camera_position(ball_z=0.0)
+        camera_pos, look_at = get_tee_box_camera()
 
         # Camera should be behind (negative Z) and above ground
-        # Scene coordinates: X=lateral, Y=height, Z=forward
         assert camera_pos.z < 0.0  # Behind on Z axis
         assert camera_pos.y > 0.0  # Above ground
+        # Look at should be forward
+        assert look_at.z > camera_pos.z
 
-    def test_calculate_camera_position_follows_ball(self) -> None:
-        """Test camera follows ball during flight."""
+    def test_follow_camera_tracks_ball(self) -> None:
+        """Test follow camera tracks ball during flight."""
         from gc2_connect.open_range.visualization.ball_animation import (
-            calculate_camera_position,
+            calculate_follow_camera,
         )
 
         # Ball at origin
-        cam1 = calculate_camera_position(ball_z=0.0)
+        cam1, _ = calculate_follow_camera(ball_z=0.0, target_z=0.0)
 
         # Ball has moved forward (forward is +Z in scene coordinates)
-        cam2 = calculate_camera_position(ball_z=100.0)
+        cam2, _ = calculate_follow_camera(ball_z=100.0, target_z=100.0)
 
         # Camera should have moved forward (positive Z) as well
         assert cam2.z > cam1.z
@@ -297,12 +297,12 @@ class TestCameraPosition:
         """Test camera maintains consistent offset from ball."""
         from gc2_connect.open_range.visualization.ball_animation import (
             CAMERA_FOLLOW_DISTANCE,
-            calculate_camera_position,
+            calculate_follow_camera,
         )
 
         # Ball at 100 yards forward (scene Z=100)
         ball_z = 100.0
-        camera_pos = calculate_camera_position(ball_z=ball_z)
+        camera_pos, _ = calculate_follow_camera(ball_z=ball_z, target_z=ball_z)
 
         # Camera should be behind ball by follow distance (on Z axis)
         assert abs(ball_z - camera_pos.z - CAMERA_FOLLOW_DISTANCE) < 10

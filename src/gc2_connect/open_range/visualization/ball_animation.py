@@ -38,9 +38,11 @@ PHASE_COLORS: dict[Phase, str] = {
 }
 
 # Camera configuration
-CAMERA_FOLLOW_DISTANCE: float = 30.0  # Yards behind ball
-CAMERA_HEIGHT_OFFSET: float = 15.0  # Feet above ball
-CAMERA_LATERAL_OFFSET: float = 5.0  # Yards to side for better view
+CAMERA_FOLLOW_DISTANCE: float = 40.0  # Yards behind ball
+CAMERA_HEIGHT_OFFSET: float = 20.0  # Yards above ground
+CAMERA_LATERAL_OFFSET: float = 10.0  # Yards to side for better view
+CAMERA_FOLLOW_DELAY: float = 0.5  # Seconds to wait before camera starts following
+CAMERA_END_DELAY: float = 2.0  # Seconds to show final position before resetting
 
 # Animation configuration
 DEFAULT_TARGET_FPS: int = 60
@@ -56,12 +58,30 @@ class AnimationFrame:
     time: float
 
 
-def calculate_camera_position(ball_z: float) -> Vec3:
-    """Calculate camera position to track ball along the range.
+def get_tee_box_camera() -> tuple[Vec3, Vec3]:
+    """Get the default tee box camera position and look-at.
 
-    The camera stays at a fixed lateral position and height,
-    moving only along the Z axis (forward) to track the ball.
-    This prevents the scene from rotating during animation.
+    Returns:
+        Tuple of (camera_position, look_at_position) for tee box view.
+    """
+    camera_pos = Vec3(
+        x=CAMERA_LATERAL_OFFSET,  # Offset to the right
+        y=CAMERA_HEIGHT_OFFSET,  # Above ground
+        z=-CAMERA_FOLLOW_DISTANCE,  # Behind tee
+    )
+    look_at = Vec3(
+        x=0.0,  # Center of range
+        y=5.0,  # Slightly above ground
+        z=100.0,  # Looking down range
+    )
+    return camera_pos, look_at
+
+
+def calculate_follow_camera(ball_z: float, target_z: float) -> tuple[Vec3, Vec3]:
+    """Calculate camera position and look-at to follow ball along range.
+
+    The camera smoothly follows the ball, staying behind it and looking
+    ahead. Uses fixed height and lateral position to prevent rotation.
 
     Scene coordinate system:
     - X: Lateral (+ = right)
@@ -69,35 +89,29 @@ def calculate_camera_position(ball_z: float) -> Vec3:
     - Z: Forward (+ = away from tee)
 
     Args:
-        ball_z: Ball's Z position (forward distance) in scene coordinates.
+        ball_z: Ball's current Z position (forward distance) in scene units.
+        target_z: Where to look at on the Z axis.
 
     Returns:
-        Camera position in scene coordinates.
+        Tuple of (camera_position, look_at_position) in scene coordinates.
     """
-    return Vec3(
-        x=CAMERA_LATERAL_OFFSET,  # Fixed lateral offset from center
+    # Camera follows behind the ball, but stays at a minimum distance back
+    camera_z = max(ball_z - CAMERA_FOLLOW_DISTANCE, -CAMERA_FOLLOW_DISTANCE)
+
+    camera_pos = Vec3(
+        x=CAMERA_LATERAL_OFFSET,  # Fixed lateral offset
         y=CAMERA_HEIGHT_OFFSET,  # Fixed height
-        z=max(ball_z - CAMERA_FOLLOW_DISTANCE, -CAMERA_FOLLOW_DISTANCE),  # Behind the ball
+        z=camera_z,  # Follow the ball
     )
 
-
-def calculate_camera_look_at(ball_z: float) -> Vec3:
-    """Calculate where camera should look.
-
-    Looks at a point along the center of the range at the ball's Z distance.
-    This keeps the ground stable and prevents rotation.
-
-    Args:
-        ball_z: Ball's Z position (forward distance) in scene coordinates.
-
-    Returns:
-        Look-at position in scene coordinates.
-    """
-    return Vec3(
-        x=0.0,  # Look at center of range
-        y=5.0,  # Look slightly above ground
-        z=ball_z + 50.0,  # Look ahead of ball
+    # Look ahead of the ball position
+    look_at = Vec3(
+        x=0.0,  # Center of range
+        y=5.0,  # Slightly above ground
+        z=target_z + 30.0,  # Look ahead of target
     )
+
+    return camera_pos, look_at
 
 
 class BallAnimator:
@@ -244,10 +258,13 @@ class BallAnimator:
         speed: float = DEFAULT_SPEED_MULTIPLIER,
         on_phase_change: Callable[[Phase], None] | None = None,
     ) -> None:
-        """Animate ball along trajectory.
+        """Animate ball along trajectory with cinematic camera.
 
-        Plays the complete ball animation from launch to rest,
-        updating the scene and calling phase change callbacks.
+        Camera behavior:
+        1. Start at tee box view, hold for CAMERA_FOLLOW_DELAY seconds
+        2. Smoothly follow ball along range (no rotation)
+        3. After ball stops, hold final position for CAMERA_END_DELAY seconds
+        4. Reset camera to tee box view
 
         Args:
             result: Shot result with trajectory data.
@@ -269,8 +286,19 @@ class BallAnimator:
 
         # Frame timing
         frame_delay = (1.0 / DEFAULT_TARGET_FPS) / speed
+        total_time = self.trajectory[-1].t
+
+        # Calculate when camera should start following (in animation time)
+        follow_start_time = CAMERA_FOLLOW_DELAY / speed
+
+        # Set initial tee box camera
+        if scene is not None:
+            tee_cam_pos, tee_cam_look = get_tee_box_camera()
+            scene.update_camera(tee_cam_pos, tee_cam_look)
 
         last_phase = Phase.FLIGHT
+        final_scene_pos = Vec3(x=0.0, y=0.0, z=0.0)
+
         for i, frame_pos in enumerate(frames):
             if not self.is_animating:
                 break
@@ -278,7 +306,6 @@ class BallAnimator:
             self.current_frame = i
 
             # Calculate time at this frame
-            total_time = self.trajectory[-1].t
             frame_time = (i / len(frames)) * total_time
 
             # Get phase at this time
@@ -308,15 +335,25 @@ class BallAnimator:
                     z=yards_to_scene(frame_pos.x),  # Physics forward -> Scene Z
                 )
                 scene.update_ball_position(scene_pos)
+                final_scene_pos = scene_pos
 
-                # Update camera to track ball along range
-                # Camera moves along Z axis, keeping stable view (no rotation)
-                camera_pos = calculate_camera_position(scene_pos.z)
-                look_at = calculate_camera_look_at(scene_pos.z)
-                scene.update_camera(camera_pos, look_at)
+                # Camera behavior: stay at tee, then follow
+                if frame_time >= follow_start_time:
+                    # Follow the ball
+                    camera_pos, look_at = calculate_follow_camera(scene_pos.z, scene_pos.z)
+                    scene.update_camera(camera_pos, look_at)
+                # Before follow_start_time, camera stays at tee box position
 
             # Wait for next frame
             await asyncio.sleep(frame_delay)
+
+        # Hold on final position
+        if scene is not None and self.is_animating:
+            await asyncio.sleep(CAMERA_END_DELAY / speed)
+
+            # Reset camera to tee box view
+            tee_cam_pos, tee_cam_look = get_tee_box_camera()
+            scene.update_camera(tee_cam_pos, tee_cam_look)
 
         self.is_animating = False
         self.current_phase = Phase.STOPPED
