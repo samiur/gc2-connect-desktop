@@ -151,12 +151,12 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Create open_range/visualization/ball_animation.py
   - [x] Implement ball flight animation
 
-- [ ] **Prompt 20**: Open Range UI Panel
-  - [ ] Write integration tests
-  - [ ] Create ui/components/mode_selector.py
-  - [ ] Create ui/components/open_range_view.py
-  - [ ] Implement phase indicators
-  - [ ] Implement shot data display
+- [x] **Prompt 20**: Open Range UI Panel
+  - [x] Write integration tests
+  - [x] Create ui/components/mode_selector.py
+  - [x] Create ui/components/open_range_view.py
+  - [x] Implement phase indicators
+  - [x] Implement shot data display
 
 - [ ] **Prompt 21**: Open Range Integration
   - [ ] Write integration flow tests
