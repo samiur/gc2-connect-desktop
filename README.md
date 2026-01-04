@@ -1,15 +1,29 @@
 # GC2 Connect Desktop
 
-A cross-platform desktop application to read Foresight GC2 launch monitor data and send shots to GSPro.
+A cross-platform desktop application to read Foresight GC2 launch monitor data and send shots to GSPro, with a built-in driving range simulator.
 
 ## Features
 
-- 📡 USB connection to GC2 launch monitor
-- 🎯 Real-time shot data display
-- 🟢 Ball status indicators (ready/ball detected) synced with GC2 LEDs
-- 🌐 Remote connection to GSPro via Open Connect API v1
-- 📊 Shot history tracking
-- 🧪 Mock mode for testing without hardware
+- **GSPro Mode**
+  - USB connection to GC2 launch monitor
+  - Real-time shot data display
+  - Ball status indicators (ready/ball detected) synced with GC2 LEDs
+  - Remote connection to GSPro via Open Connect API v1
+  - Shot history tracking with CSV export
+
+- **Open Range Mode** (New in v1.1.0)
+  - Built-in 3D driving range simulator
+  - Physics-accurate ball flight using Nathan model + WSU aerodynamics
+  - Realistic bounce and roll behavior
+  - Real-time shot data display (carry, total, offline, max height)
+  - Phase indicators (Flight, Bounce, Rolling, Stopped)
+  - Trajectory tracing with phase-colored path
+  - No external software required
+
+- **Common Features**
+  - Mode switching without restart
+  - Mock mode for testing without hardware
+  - Persistent settings
 
 ## Requirements
 
@@ -54,11 +68,13 @@ uv run python -m gc2_connect.main
 uv run gc2-connect
 ```
 
-The app will start a web server at `http://localhost:8080` and open in your browser.
+The app starts a web server at `http://localhost:8080` and opens in your browser.
 
 ### USB Permissions (Linux)
 
-On Linux, you may need to add a udev rule for USB access:
+On Linux, you need to add a udev rule for USB access. See [docs/LINUX_USB_SETUP.md](docs/LINUX_USB_SETUP.md) for detailed instructions.
+
+Quick setup:
 
 ```bash
 # Create udev rule
@@ -71,25 +87,44 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-### Connecting to GC2
+### Mode Selection
 
-1. Connect your GC2 via USB
-2. Click "Connect" in the GC2 panel
-3. The status should change to "Connected"
-4. The Ready indicator turns green when the GC2 light is green
-5. The Ball indicator lights up when a ball is detected
+GC2 Connect supports two modes:
 
-### Connecting to GSPro
+1. **GSPro Mode**: Connect to GSPro on a Windows PC for full course simulation
+2. **Open Range Mode**: Use the built-in driving range simulator
 
-1. Make sure GSPro is running with Open Connect API v1 enabled
+Switch modes using the toggle at the top of the application. Your preference is saved between sessions.
+
+### GSPro Mode
+
+1. Make sure GSPro is running with **Open Connect API v1** enabled
 2. Enter the IP address of your Windows PC running GSPro
 3. Port should be 921 (default)
 4. Click "Connect"
+5. Shots from your GC2 will appear in GSPro
+
+### Open Range Mode
+
+1. Select "Open Range" from the mode selector
+2. Connect your GC2 (or use Mock mode for testing)
+3. Hit shots and watch them fly!
+4. View shot data including:
+   - Carry distance
+   - Total distance (carry + roll)
+   - Offline distance (left/right)
+   - Max height
+   - Flight time
+
+The trajectory line shows:
+- **Green**: Ball in flight
+- **Orange**: Ball bouncing
+- **Blue**: Ball rolling
 
 ### Testing Without Hardware
 
 1. Check "Use Mock GC2"
-2. Click "Connect" 
+2. Click "Connect"
 3. Click "Send Test Shot" to simulate shots
 
 ## Configuration
@@ -98,9 +133,12 @@ Settings are stored in platform-specific locations:
 - **macOS**: `~/Library/Application Support/GC2 Connect/settings.json`
 - **Linux**: `~/.config/gc2-connect/settings.json`
 
+### Settings Schema (v2)
+
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "mode": "gspro",
   "gspro": {
     "host": "192.168.1.100",
     "port": 921,
@@ -115,6 +153,18 @@ Settings are stored in platform-specific locations:
     "theme": "dark",
     "show_history": true,
     "history_limit": 50
+  },
+  "open_range": {
+    "conditions": {
+      "temp_f": 70.0,
+      "elevation_ft": 0.0,
+      "humidity_pct": 50.0,
+      "wind_speed_mph": 0.0,
+      "wind_dir_deg": 0.0
+    },
+    "surface": "Fairway",
+    "show_trajectory": true,
+    "camera_follow": true
   }
 }
 ```
@@ -125,16 +175,40 @@ Settings are stored in platform-specific locations:
 gc2-connect-desktop/
 ├── pyproject.toml
 ├── README.md
+├── CONTRIBUTING.md
+├── CHANGELOG.md
+├── docs/
+│   ├── PRD.md                # Product requirements
+│   ├── PRD_OPEN_RANGE.md     # Open Range requirements
+│   ├── TRD.md                # Technical requirements
+│   ├── TRD_OPEN_RANGE.md     # Open Range technical design
+│   ├── GC2_PROTOCOL.md       # GC2 USB protocol specification
+│   ├── GSPRO_CONNECT.md      # GSPro API implementation guide
+│   ├── PHYSICS.md            # Golf ball physics specification
+│   ├── LINUX_USB_SETUP.md    # Linux USB permissions guide
+│   └── MACOS_USB_SETUP.md    # macOS USB notes
 └── src/
     └── gc2_connect/
         ├── main.py           # Entry point
         ├── models.py         # Data models
         ├── ui/
-        │   └── app.py        # NiceGUI application
+        │   ├── app.py        # NiceGUI application
+        │   └── components/   # UI components
         ├── gc2/
         │   └── usb_reader.py # GC2 USB communication
-        └── gspro/
-            └── client.py     # GSPro API client
+        ├── gspro/
+        │   └── client.py     # GSPro API client
+        ├── open_range/       # Open Range feature
+        │   ├── models.py     # Trajectory/shot models
+        │   ├── engine.py     # High-level engine
+        │   ├── physics/      # Physics simulation
+        │   └── visualization/# 3D rendering
+        ├── services/
+        │   ├── shot_router.py # Mode-based shot routing
+        │   ├── history.py    # Shot history manager
+        │   └── export.py     # CSV export
+        └── config/
+            └── settings.py   # Settings management
 ```
 
 ## Troubleshooting
@@ -142,7 +216,7 @@ gc2-connect-desktop/
 ### GC2 Not Found
 
 1. Make sure the GC2 is powered on and connected via USB
-2. Check USB permissions (see above for Linux)
+2. Check USB permissions (see [docs/LINUX_USB_SETUP.md](docs/LINUX_USB_SETUP.md) for Linux)
 3. Try running with `sudo` (not recommended for regular use)
 4. Verify VID/PID: `lsusb | grep -i foresight` or check System Information on macOS
 
@@ -157,10 +231,18 @@ gc2-connect-desktop/
 ### No Shot Data
 
 1. Make sure the GC2 is detecting balls
-2. Check the GC2's LED status
+2. Check the GC2's LED status (green = ready)
 3. Try hitting a few shots to verify the GC2 is working
 
+### Open Range Issues
+
+1. **Ball not animating**: Ensure the 3D scene has loaded (wait 2 seconds after switching modes)
+2. **Unrealistic distances**: Verify the physics settings match expected conditions
+3. **Performance issues**: Close other browser tabs; the app uses WebGL for 3D rendering
+
 ## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
 ```bash
 # Install dependencies (includes dev deps)
@@ -169,14 +251,17 @@ uv sync
 # Run tests
 uv run pytest
 
+# Run tests with coverage
+uv run pytest --cov=gc2_connect --cov-report=html
+
 # Run linting
 uv run ruff check .
 
 # Run type checking
 uv run mypy src/
 
-# Run mock GSPro server for testing
-uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
+# Run all CI checks
+uv run pytest && uv run mypy src/ && uv run ruff check . && uv run ruff format --check .
 ```
 
 ### Test Simulators
@@ -193,12 +278,17 @@ See `CLAUDE.md` for detailed usage examples.
 
 ## Documentation
 
-- `plan.md` - Implementation roadmap with prompts
-- `todo.md` - Current implementation progress
-- `docs/GC2_PROTOCOL.md` - GC2 USB protocol specification
-- `docs/GSPRO_CONNECT.md` - GSPro Open Connect API implementation guide
-- `docs/PRD.md` - Product requirements
-- `docs/TRD.md` - Technical requirements
+- [CHANGELOG.md](CHANGELOG.md) - Version history
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Development guide
+- [docs/PRD.md](docs/PRD.md) - Product requirements
+- [docs/PRD_OPEN_RANGE.md](docs/PRD_OPEN_RANGE.md) - Open Range feature requirements
+- [docs/TRD.md](docs/TRD.md) - Technical requirements
+- [docs/TRD_OPEN_RANGE.md](docs/TRD_OPEN_RANGE.md) - Open Range technical design
+- [docs/GC2_PROTOCOL.md](docs/GC2_PROTOCOL.md) - GC2 USB protocol specification
+- [docs/GSPRO_CONNECT.md](docs/GSPRO_CONNECT.md) - GSPro Open Connect API guide
+- [docs/PHYSICS.md](docs/PHYSICS.md) - Golf ball physics model
+- [docs/LINUX_USB_SETUP.md](docs/LINUX_USB_SETUP.md) - Linux USB permissions
+- [docs/MACOS_USB_SETUP.md](docs/MACOS_USB_SETUP.md) - macOS USB notes
 
 ## License
 
