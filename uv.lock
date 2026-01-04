@@ -541,7 +541,7 @@ wheels = [
 
 [[package]]
 name = "gc2-connect"
-version = "0.1.0"
+version = "1.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "nicegui" },

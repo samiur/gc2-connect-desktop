@@ -188,14 +188,14 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Fix all ruff issues
   - [x] Add pre-commit hooks
 
-- [ ] **Prompt 24**: Documentation & Release
-  - [ ] Update README for Open Range
-  - [ ] Create CONTRIBUTING.md
-  - [ ] Create CHANGELOG.md
-  - [ ] USB setup guides
-  - [ ] Version bump to 1.1.0
-  - [ ] Full test suite with coverage
-  - [ ] Build package
+- [x] **Prompt 24**: Documentation & Release
+  - [x] Update README for Open Range
+  - [x] Create CONTRIBUTING.md
+  - [x] Create CHANGELOG.md
+  - [x] USB setup guides
+  - [x] Version bump to 1.1.0
+  - [x] Full test suite with coverage
+  - [x] Build package
 
 ---
 
