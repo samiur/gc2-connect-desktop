@@ -9,6 +9,7 @@ dependencies = [
     "pyusb>=1.2.1",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "pywebview>=6.1",
 ]
 
 [project.optional-dependencies]
@@ -101,5 +102,7 @@ warn_required_dynamic_aliases = true
 
 [dependency-groups]
 dev = [
+    "pillow>=12.1.0",
     "pre-commit>=4.5.1",
+    "pyinstaller>=6.17.0",
 ]
