@@ -93,7 +93,7 @@ def trajectory_to_scene_coords(trajectory: list[TrajectoryPoint]) -> list[Vec3]:
     Trajectory points use physics coordinates:
     - x: forward distance (yards) -> Scene Z
     - y: height (feet) -> Scene Y
-    - z: lateral distance (yards) -> Scene X
+    - z: lateral distance (yards) -> Scene X (negated)
 
     Args:
         trajectory: List of trajectory points.
@@ -103,7 +103,7 @@ def trajectory_to_scene_coords(trajectory: list[TrajectoryPoint]) -> list[Vec3]:
     """
     return [
         Vec3(
-            x=yards_to_scene(point.z),  # Physics lateral -> Scene X
+            x=-yards_to_scene(point.z),  # Physics lateral -> Scene X (negated)
             y=feet_to_scene(point.y),  # Height stays Y
             z=yards_to_scene(point.x),  # Physics forward -> Scene Z
         )

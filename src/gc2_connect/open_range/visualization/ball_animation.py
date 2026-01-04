@@ -327,9 +327,9 @@ class BallAnimator:
                 # Convert physics coordinates to scene coordinates:
                 # Physics X (forward) -> Scene Z
                 # Physics Y (height) -> Scene Y
-                # Physics Z (lateral) -> Scene X
+                # Physics Z (lateral) -> Scene X (negated: physics +Z is right, scene -X is right)
                 scene_pos = Vec3(
-                    x=yards_to_scene(frame_pos.z),  # Physics lateral -> Scene X
+                    x=-yards_to_scene(frame_pos.z),  # Physics lateral -> Scene X (negated)
                     y=feet_to_scene(frame_pos.y),  # Height stays Y
                     z=yards_to_scene(frame_pos.x),  # Physics forward -> Scene Z
                 )
