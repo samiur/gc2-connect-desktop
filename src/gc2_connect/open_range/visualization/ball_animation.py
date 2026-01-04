@@ -62,6 +62,11 @@ def calculate_camera_position(ball_pos: Vec3) -> Vec3:
     The camera follows behind and above the ball to provide
     a good view of the flight and landing.
 
+    Scene coordinate system:
+    - X: Lateral (+ = right)
+    - Y: Height
+    - Z: Forward (+ = away from tee)
+
     Args:
         ball_pos: Current ball position in scene coordinates.
 
@@ -69,9 +74,9 @@ def calculate_camera_position(ball_pos: Vec3) -> Vec3:
         Camera position in scene coordinates.
     """
     return Vec3(
-        x=ball_pos.x - CAMERA_FOLLOW_DISTANCE,
+        x=ball_pos.x + CAMERA_LATERAL_OFFSET,  # Slightly to the right for view
         y=max(ball_pos.y + CAMERA_HEIGHT_OFFSET / 3, CAMERA_HEIGHT_OFFSET / 3),
-        z=ball_pos.z - CAMERA_LATERAL_OFFSET,
+        z=ball_pos.z - CAMERA_FOLLOW_DISTANCE,  # Behind the ball (negative Z)
     )
 
 
@@ -273,10 +278,14 @@ class BallAnimator:
                     yards_to_scene,
                 )
 
+                # Convert physics coordinates to scene coordinates:
+                # Physics X (forward) -> Scene Z
+                # Physics Y (height) -> Scene Y
+                # Physics Z (lateral) -> Scene X
                 scene_pos = Vec3(
-                    x=yards_to_scene(frame_pos.x),
-                    y=feet_to_scene(frame_pos.y),
-                    z=yards_to_scene(frame_pos.z),
+                    x=yards_to_scene(frame_pos.z),  # Physics lateral -> Scene X
+                    y=feet_to_scene(frame_pos.y),  # Height stays Y
+                    z=yards_to_scene(frame_pos.x),  # Physics forward -> Scene Z
                 )
                 scene.update_ball_position(scene_pos)
 

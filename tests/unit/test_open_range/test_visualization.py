@@ -274,9 +274,10 @@ class TestCameraPosition:
         ball_pos = Vec3(x=0.0, y=0.0, z=0.0)
         camera_pos = calculate_camera_position(ball_pos)
 
-        # Camera should be behind and above ball
-        assert camera_pos.x < ball_pos.x
-        assert camera_pos.y > ball_pos.y
+        # Camera should be behind (negative Z) and above ball
+        # Scene coordinates: X=lateral, Y=height, Z=forward
+        assert camera_pos.z < ball_pos.z  # Behind on Z axis
+        assert camera_pos.y > ball_pos.y  # Above
 
     def test_calculate_camera_position_follows_ball(self) -> None:
         """Test camera follows ball during flight."""
@@ -289,12 +290,12 @@ class TestCameraPosition:
         pos1 = Vec3(x=0.0, y=0.0, z=0.0)
         cam1 = calculate_camera_position(pos1)
 
-        # Ball has moved forward
-        pos2 = Vec3(x=100.0, y=50.0, z=5.0)
+        # Ball has moved forward (forward is +Z in scene coordinates)
+        pos2 = Vec3(x=5.0, y=50.0, z=100.0)
         cam2 = calculate_camera_position(pos2)
 
-        # Camera should have moved forward as well
-        assert cam2.x > cam1.x
+        # Camera should have moved forward (positive Z) as well
+        assert cam2.z > cam1.z
 
     def test_camera_maintains_relative_offset(self) -> None:
         """Test camera maintains consistent offset from ball."""
@@ -304,11 +305,12 @@ class TestCameraPosition:
             calculate_camera_position,
         )
 
-        ball_pos = Vec3(x=100.0, y=30.0, z=0.0)
+        # Ball at 100 yards forward (scene Z=100)
+        ball_pos = Vec3(x=0.0, y=30.0, z=100.0)
         camera_pos = calculate_camera_position(ball_pos)
 
-        # Camera should be behind ball by follow distance
-        assert abs(ball_pos.x - camera_pos.x - CAMERA_FOLLOW_DISTANCE) < 10
+        # Camera should be behind ball by follow distance (on Z axis)
+        assert abs(ball_pos.z - camera_pos.z - CAMERA_FOLLOW_DISTANCE) < 10
 
 
 class TestPhaseColors:

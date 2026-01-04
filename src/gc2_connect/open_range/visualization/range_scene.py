@@ -9,10 +9,15 @@ This module provides:
 - Dark theme friendly lighting
 - Coordinate conversion utilities
 
-Coordinate system:
-- X: Forward toward targets (yards)
-- Y: Vertical height (feet)
-- Z: Lateral movement (+ = right)
+Coordinate system (Three.js/NiceGUI):
+- X: Lateral movement (+ = right)
+- Y: Vertical height
+- Z: Forward toward targets (+ = away from camera)
+
+Physics coordinate mapping:
+- Physics X (forward) -> Scene Z
+- Physics Y (height) -> Scene Y
+- Physics Z (lateral) -> Scene X
 """
 
 from __future__ import annotations
@@ -85,22 +90,22 @@ def feet_to_scene(feet: float) -> float:
 def trajectory_to_scene_coords(trajectory: list[TrajectoryPoint]) -> list[Vec3]:
     """Convert trajectory points to scene coordinates.
 
-    Trajectory points use:
-    - x: forward distance (yards)
-    - y: height (feet)
-    - z: lateral distance (yards)
+    Trajectory points use physics coordinates:
+    - x: forward distance (yards) -> Scene Z
+    - y: height (feet) -> Scene Y
+    - z: lateral distance (yards) -> Scene X
 
     Args:
         trajectory: List of trajectory points.
 
     Returns:
-        List of Vec3 positions in scene coordinates.
+        List of Vec3 positions in scene coordinates (X=lateral, Y=height, Z=forward).
     """
     return [
         Vec3(
-            x=yards_to_scene(point.x),
-            y=feet_to_scene(point.y),
-            z=yards_to_scene(point.z),
+            x=yards_to_scene(point.z),  # Physics lateral -> Scene X
+            y=feet_to_scene(point.y),  # Height stays Y
+            z=yards_to_scene(point.x),  # Physics forward -> Scene Z
         )
         for point in trajectory
     ]
@@ -137,7 +142,8 @@ class RangeScene:
         self.scene: Any = None
         self.ball: Any = None
         self.trajectory_line: Any = None
-        self._camera_position: Vec3 = Vec3(x=-10.0, y=10.0, z=0.0)
+        # Camera behind tee (negative Z), above ground (positive Y), centered (X=0)
+        self._camera_position: Vec3 = Vec3(x=0.0, y=15.0, z=-20.0)
 
     def build(self) -> Any:
         """Create and return the 3D scene.
@@ -173,7 +179,7 @@ class RangeScene:
         if self.scene is None:
             return
 
-        # Ground plane dimensions
+        # Ground plane dimensions (in scene units)
         length = yards_to_scene(RANGE_LENGTH_YARDS)
         width = yards_to_scene(RANGE_WIDTH_YARDS)
 
@@ -181,21 +187,22 @@ class RangeScene:
             from nicegui import ui
 
             # Create ground as a flat box (thin plane)
+            # Three.js: width=X (lateral), height=Y (vertical), depth=Z (forward)
             ui.scene.box(
-                width=width,
-                height=0.1,  # Very thin
-                depth=length,
+                width=width,  # Lateral (X)
+                height=0.1,  # Thin (Y)
+                depth=length,  # Forward (Z)
             ).material(GROUND_COLOR).move(
-                length / 2,  # Center at half length (forward)
+                0,  # Centered laterally (X)
                 -0.05,  # Slightly below y=0
-                0,  # Centered laterally
+                length / 2,  # Center at half length forward (Z)
             )
 
     def _create_distance_markers(self) -> None:
         """Add distance markers at standard intervals.
 
         Places white markers at each distance to help players
-        gauge shot distances.
+        gauge shot distances. Markers are placed along the Z axis (forward).
         """
         if self.scene is None:
             return
@@ -205,26 +212,27 @@ class RangeScene:
 
             for distance in DISTANCE_MARKERS:
                 # Create marker as a thin white cylinder
-                x = yards_to_scene(distance)
+                # Distance is along Z axis (forward)
+                z = yards_to_scene(distance)
                 ui.scene.cylinder(
                     top_radius=0.5,
                     bottom_radius=0.5,
                     height=0.1,
-                ).material(MARKER_COLOR).move(x, 0.05, 0)
+                ).material(MARKER_COLOR).move(0, 0.05, z)
 
                 # Add text label (using a small box as placeholder)
-                # Note: NiceGUI's scene.text is limited; use alternative
+                # Offset slightly to the side (X axis)
                 ui.scene.box(
                     width=2,
                     height=0.5,
                     depth=0.1,
-                ).material(MARKER_COLOR).move(x, 0.5, 5)
+                ).material(MARKER_COLOR).move(5, 0.5, z)
 
     def _create_target_greens(self) -> None:
         """Add target greens at common distances.
 
         Creates circular darker green areas representing
-        target greens that players can aim for.
+        target greens that players can aim for. Greens are placed along Z axis.
         """
         if self.scene is None:
             return
@@ -235,7 +243,7 @@ class RangeScene:
             for green in TARGET_GREENS:
                 distance = green["distance"]
                 radius = green["radius"]
-                x = yards_to_scene(distance)
+                z = yards_to_scene(distance)  # Distance along Z axis
                 r = yards_to_scene(radius)
 
                 # Create green as a flat cylinder
@@ -243,7 +251,7 @@ class RangeScene:
                     top_radius=r,
                     bottom_radius=r,
                     height=0.05,
-                ).material(GREEN_COLOR).move(x, 0.01, 0)
+                ).material(GREEN_COLOR).move(0, 0.01, z)
 
     def _setup_lighting(self) -> None:
         """Configure scene lighting for dark theme.
@@ -257,17 +265,18 @@ class RangeScene:
         with self.scene:
             # NiceGUI's scene uses spot_light (no point_light available)
             # Use a wide-angle spot light as ambient simulation
+            # Position above the middle of the range
             self.scene.spot_light(
                 intensity=AMBIENT_LIGHT_INTENSITY * 1000,
                 distance=500,
                 angle=180,  # Wide angle for ambient effect
-            ).move(0, 50, 0)
+            ).move(0, 100, 150)  # Above and forward
 
-            # Directional light from above/behind
+            # Directional light from above/behind (simulating sun)
             self.scene.spot_light(
                 intensity=DIRECTIONAL_LIGHT_INTENSITY * 1000,
                 distance=500,
-            ).move(-50, 100, 0)
+            ).move(0, 150, -50)  # Behind and high up
 
     def _create_ball(self) -> None:
         """Create the golf ball sphere.
@@ -289,19 +298,20 @@ class RangeScene:
         """Set initial camera position behind ball.
 
         Positions the camera behind and above the tee box
-        for a good view of the range.
+        for a good view of the range. Camera looks forward along Z axis.
         """
         if self.scene is None:
             return
 
-        # Initial camera position: behind and above tee
+        # Initial camera position: behind (negative Z) and above tee
+        # Looking forward along Z axis toward the range
         self.scene.move_camera(
             x=self._camera_position.x,
             y=self._camera_position.y,
             z=self._camera_position.z,
-            look_at_x=50,  # Look toward middle of range
-            look_at_y=5,
-            look_at_z=0,
+            look_at_x=0,  # Centered laterally
+            look_at_y=5,  # Slightly above ground
+            look_at_z=100,  # Look forward toward range
         )
 
     def update_ball_position(self, position: Vec3) -> None:
