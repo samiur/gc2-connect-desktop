@@ -309,6 +309,7 @@ class RangeScene:
 
         # Initial camera position: behind (negative Z) and above tee
         # Looking forward along Z axis toward the range
+        # up_y=1 keeps Y as "up" to prevent scene rotation
         self.scene.move_camera(
             x=self._camera_position.x,
             y=self._camera_position.y,
@@ -316,6 +317,9 @@ class RangeScene:
             look_at_x=0,  # Centered laterally
             look_at_y=5,  # Slightly above ground
             look_at_z=100,  # Look forward toward range
+            up_x=0,
+            up_y=1,
+            up_z=0,
         )
 
     def update_ball_position(self, position: Vec3) -> None:
@@ -336,6 +340,7 @@ class RangeScene:
         """
         if self.scene is not None:
             self._camera_position = position
+            # up_y=1 keeps Y as "up" to prevent scene rotation during animation
             self.scene.move_camera(
                 x=position.x,
                 y=position.y,
@@ -343,6 +348,9 @@ class RangeScene:
                 look_at_x=look_at.x,
                 look_at_y=look_at.y,
                 look_at_z=look_at.z,
+                up_x=0,
+                up_y=1,
+                up_z=0,
             )
 
     def draw_trajectory_line(self, points: list[Vec3]) -> None:

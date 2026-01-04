@@ -166,6 +166,13 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Handle mode-specific UI visibility
   - [x] Performance validation
 
+- [ ] **Prompt 21b**: Ball Trajectory Tracing
+  - [ ] Write tests for trajectory trace
+  - [ ] Implement draw_trajectory_line() in range_scene.py
+  - [ ] Update BallAnimator to draw trajectory progressively
+  - [ ] Use phase-appropriate colors (Flight=green, Bounce=orange, Rolling=blue)
+  - [ ] Ensure trace remains visible after animation
+
 ---
 
 ## Phase 6: Polish & Release
@@ -238,6 +245,9 @@ uv run python tools/mock_gspro_server.py
 - **Open Range Physics (2026-01-03)**: Using Nathan model + WSU aerodynamics. Cd uses piecewise linear with spin term. Cl uses quadratic formula (not table lookup). Validated against libgolf reference implementation.
 - **Open Range Visualization (2026-01-03)**: Using NiceGUI's Three.js integration (ui.scene). Ball animation follows trajectory points with phase indicators.
 - **Auto-Reconnection (2026-01-03)**: ReconnectionManager uses exponential backoff (1s, 2s, 4s, 8s, 16s). GC2 USB disconnects detected via error messages (no device, io error, etc). GSPro disconnects detected via socket errors. UI shows yellow "Reconnecting..." status during attempts.
+- **Incomplete Shot Handling (2026-01-03)**: GC2 sometimes doesn't send complete spin data (ball moves out of view before calculation completes). Added SPIN_WAIT_TIMEOUT_SEC (1.5s) - if we have basic shot data (SHOT_ID, SPEED_MPH, ELEVATION_DEG) but no spin after timeout, process the shot anyway with estimated spin. Shots are logged as "INCOMPLETE" so users know spin data may be inaccurate.
+- **Interrupted Shot Handling (2026-01-03)**: GC2 sometimes abandons multi-packet shot data transmission when ball status changes (0M message interrupts 0H message). Fixed by: (1) clearing line_buffer when new 0H message starts (prevents data corruption), (2) detecting when 0M interrupts 0H and salvaging/discarding incomplete data immediately rather than letting it pollute subsequent shots, (3) allowing shots with just SHOT_ID+SPEED_MPH to be processed with estimated launch angle (20°) when ELEVATION_DEG is missing.
+- **GC2 Two-Phase Transmission (2026-01-03)**: GC2 sends shot data twice per shot: preliminary (~140ms, estimated spin) and refined (~1000ms, accurate spin). We now skip preliminary data (MSEC_SINCE_CONTACT < 500) and wait for refined data to get accurate spin measurements. If refined is interrupted, salvage logic kicks in.
 
 ### Architecture Decisions
 
@@ -245,3 +255,9 @@ uv run python tools/mock_gspro_server.py
 - **Mode Switching**: ShotRouter handles routing, UI handles visibility
 - **Settings Migration**: Automatic v1 -> v2 migration on load
 - **Coordinate System**: X=forward (yards), Y=height (feet), Z=lateral (yards)
+- **Test Simulator Infrastructure (2026-01-03)**: Created comprehensive test infrastructure in `tests/simulators/` with:
+  - **GC2 USB Simulator**: Generates realistic 64-byte USB packets matching real GC2 behavior. Supports two-phase transmission (preliminary at ~200ms, refined at ~1000ms), field splitting across packet boundaries, and status message interruptions. Uses `PacketSource` protocol for dependency injection into `GC2USBReader`.
+  - **Mock GSPro Server**: Async TCP server with configurable response types (SUCCESS, ERROR, TIMEOUT, DISCONNECT, INVALID_JSON), delays, and shot tracking. Supports dynamic config updates during tests.
+  - **TimeController**: Enables INSTANT mode for fast deterministic tests vs REAL mode for actual timing behavior.
+  - **Pre-built Scenarios**: `create_two_phase_transmission_sequence()`, `create_status_interrupted_sequence()`, `create_split_field_sequence()`, `create_rapid_fire_sequence()` for common test patterns.
+  - **Key Benefit**: All 682 tests pass including integration tests that verify no packets are dropped during rapid fire sequences (5/5 shots received in correct order).

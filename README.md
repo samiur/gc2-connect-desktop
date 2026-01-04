@@ -179,6 +179,18 @@ uv run mypy src/
 uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
 ```
 
+### Test Simulators
+
+The project includes a comprehensive test simulator infrastructure for testing without hardware:
+
+- **GC2 USB Simulator** (`tests/simulators/gc2/`): Generates realistic USB packets matching the real GC2 device behavior, including two-phase transmission (preliminary + refined data), field splitting across packets, and status message interruptions.
+
+- **Mock GSPro Server** (`tests/simulators/gspro/`): Configurable TCP server that simulates GSPro responses with support for delays, errors, and shot tracking.
+
+- **Time Controller** (`tests/simulators/timing.py`): Allows tests to run in INSTANT mode (fast, deterministic) or REAL mode (actual timing).
+
+See `CLAUDE.md` for detailed usage examples.
+
 ## Documentation
 
 - `plan.md` - Implementation roadmap with prompts

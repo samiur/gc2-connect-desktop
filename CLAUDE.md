@@ -40,7 +40,7 @@ src/gc2_connect/
 ├── main.py              # Entry point
 ├── models.py            # Pydantic data models
 ├── gc2/
-│   └── usb_reader.py    # USB communication
+│   └── usb_reader.py    # USB communication (supports PacketSource injection)
 ├── gspro/
 │   └── client.py        # TCP client
 ├── ui/
@@ -49,6 +49,18 @@ src/gc2_connect/
 
 tools/
 └── mock_gspro_server.py # Testing utility
+
+tests/simulators/        # Test infrastructure
+├── timing.py            # TimeController for deterministic tests
+├── gc2/                 # GC2 USB packet simulator
+│   ├── models.py        # SimulatedShot, PacketSequence, etc.
+│   ├── packet_generator.py  # 64-byte USB packet generation
+│   ├── scheduler.py     # Two-phase transmission timing
+│   ├── packet_source.py # SimulatedPacketSource for injection
+│   └── scenarios.py     # Pre-built test scenarios
+└── gspro/               # Mock GSPro server
+    ├── config.py        # MockGSProServerConfig
+    └── server.py        # Async TCP mock server
 ```
 
 ## Development Commands
@@ -126,3 +138,57 @@ uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
 - Async/await for I/O operations
 - Pydantic for data validation
 - Follow PEP 8 conventions
+
+## Testing Infrastructure
+
+### GC2 USB Simulator
+The `tests/simulators/gc2/` package provides realistic USB packet simulation:
+
+- **SimulatedShot**: Define shot data (ball speed, spin, angles)
+- **GC2PacketGenerator**: Generates 64-byte USB packets matching real GC2 format
+- **GC2TransmissionScheduler**: Schedules packets with realistic timing (two-phase: preliminary at ~200ms, refined at ~1000ms)
+- **SimulatedPacketSource**: Injects packets into `GC2USBReader` via the `PacketSource` protocol
+- **TimeController**: Controls timing (INSTANT for fast tests, REAL for actual timing)
+
+Example usage:
+```python
+from tests.simulators.gc2 import SimulatedPacketSource, create_two_phase_transmission_sequence
+from tests.simulators.timing import TimeController, TimeMode
+from gc2_connect.gc2 import GC2USBReader
+
+# Create a shot sequence
+sequence = create_two_phase_transmission_sequence(shot_id=1, ball_speed=145.0)
+
+# Use INSTANT mode for fast tests
+time_controller = TimeController(mode=TimeMode.INSTANT)
+source = SimulatedPacketSource(sequence, time_controller)
+
+# Inject into reader
+reader = GC2USBReader(packet_source=source)
+```
+
+### Mock GSPro Server
+The `tests/simulators/gspro/` package provides a configurable mock server:
+
+- **MockGSProServer**: Async TCP server that accepts shots and tracks them
+- **MockGSProServerConfig**: Configure response types, delays, errors
+- **ResponseType**: SUCCESS, ERROR, TIMEOUT, DISCONNECT, INVALID_JSON
+
+Example usage:
+```python
+from tests.simulators.gspro import MockGSProServer, MockGSProServerConfig, ResponseType
+
+# Create server with custom behavior
+config = MockGSProServerConfig(response_delay_ms=100, response_type=ResponseType.SUCCESS)
+async with MockGSProServer(config) as server:
+    # Connect client to server.host:server.port
+    # Send shots and verify with server.get_shots()
+    pass
+```
+
+### Pre-built Scenarios
+Use these for common test patterns:
+- `create_two_phase_transmission_sequence()` - Realistic shot with preliminary and refined data
+- `create_status_interrupted_sequence()` - 0M message interrupts 0H message
+- `create_split_field_sequence()` - Field value split across packet boundaries
+- `create_rapid_fire_sequence()` - Multiple quick shots

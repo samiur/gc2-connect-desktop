@@ -297,7 +297,6 @@ class BallAnimator:
             scene.update_camera(tee_cam_pos, tee_cam_look)
 
         last_phase = Phase.FLIGHT
-        final_scene_pos = Vec3(x=0.0, y=0.0, z=0.0)
 
         for i, frame_pos in enumerate(frames):
             if not self.is_animating:
@@ -335,7 +334,6 @@ class BallAnimator:
                     z=yards_to_scene(frame_pos.x),  # Physics forward -> Scene Z
                 )
                 scene.update_ball_position(scene_pos)
-                final_scene_pos = scene_pos
 
                 # Camera behavior: stay at tee, then follow
                 if frame_time >= follow_start_time:

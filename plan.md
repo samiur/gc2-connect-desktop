@@ -1715,6 +1715,84 @@ REQUIREMENTS:
 
 ---
 
+## Prompt 21b: Ball Trajectory Tracing
+
+```text
+Implement ball trajectory tracing to show the flight path during and after animation.
+
+CONTEXT:
+- Ball animation already follows the trajectory points
+- Camera follows the ball with cinematic behavior (delay, follow, hold, reset)
+- Need to draw a visible trace line showing the ball's path
+- The trace should remain visible after the ball lands to show complete flight path
+- NiceGUI's ui.scene doesn't have a direct line API, need to use alternative approach
+
+TASK:
+
+1. First, write tests in tests/unit/test_open_range/test_trajectory_trace.py:
+   - Test trace line is created with correct number of segments
+   - Test trace updates as ball animates
+   - Test trace is cleared when new shot starts
+   - Test trace color matches current phase
+   - Test trace remains visible after animation completes
+
+2. Implement trajectory line drawing in range_scene.py:
+   - Option A: Use connected small spheres as "breadcrumbs" along the path
+   - Option B: Use Three.js Line geometry via run_javascript
+   - Option C: Use cylinders connecting consecutive points
+   - Choose the approach that provides best visual result with NiceGUI
+
+3. Update draw_trajectory_line() method in RangeScene:
+```python
+def draw_trajectory_line(self, points: list[Vec3], color: str = "#00ff88") -> None:
+    """Draw the trajectory path line.
+
+    Args:
+        points: List of positions forming the trajectory.
+        color: Hex color for the line (default green for flight).
+    """
+    # Clear existing trajectory
+    self.clear_trajectory_line()
+
+    # Draw new trajectory using chosen approach
+    # Store references for later cleanup
+    pass
+
+def clear_trajectory_line(self) -> None:
+    """Remove the current trajectory line from scene."""
+    pass
+```
+
+4. Update BallAnimator to draw trajectory progressively:
+   - As ball moves, add points to the trace
+   - Consider drawing every Nth point (e.g., every 5th) for performance
+   - Use phase-appropriate colors:
+     - Flight: green (#00ff88)
+     - Bounce: orange (#ff8844)
+     - Rolling: blue (#00d4ff)
+   - Keep full trace visible after animation ends
+
+5. Performance considerations:
+   - Limit number of trace segments (e.g., max 500)
+   - Use efficient Three.js primitives
+   - Don't redraw entire trace each frame - append incrementally
+
+6. Visual appearance:
+   - Trace should be thin but visible
+   - Slight transparency or glow effect if possible
+   - Should contrast well against the dark green fairway
+   - Consider fading older segments (optional)
+
+REQUIREMENTS:
+- Trace visible during animation
+- Trace remains visible after ball stops
+- Trace cleared when new shot begins
+- Performance: No frame drops during animation
+- Run tests: uv run pytest tests/unit/test_open_range/test_trajectory_trace.py -v
+```
+
+---
+
 # PHASE 6: POLISH & PACKAGING
 
 ## Prompt 22: End-to-End Tests
@@ -1904,6 +1982,7 @@ REQUIREMENTS:
 19. **Prompt 19**: 3D driving range visualization
 20. **Prompt 20**: Open Range UI panel
 21. **Prompt 21**: Open Range integration
+21b. **Prompt 21b**: Ball trajectory tracing
 
 ## Phase 6: Polish & Release
 22. **Prompt 22**: End-to-end tests
