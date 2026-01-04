@@ -87,6 +87,8 @@ class GC2ConnectApp:
         self._gspro_panel: Any = None
         self._open_range_container: Any = None
         self._gspro_content_column: Any = None
+        self._open_range_placeholder: Any = None
+        self._open_range_built = False
 
         # Ball status state
         self.send_status_to_gspro = True
@@ -351,14 +353,17 @@ class GC2ConnectApp:
                         self._build_history_panel()
 
             # Open Range mode content (initially hidden)
+            # Note: We defer building the OpenRangeView until mode is switched
+            # because Three.js scenes don't initialize in hidden containers
             with ui.column().classes("flex-grow hidden") as open_range_container:
                 self._open_range_container = open_range_container
-                self.open_range_view = OpenRangeView()
-                self.open_range_view.build()
+                # Placeholder - view will be built on first mode switch
+                self._open_range_placeholder = ui.label("").classes("hidden")
 
         # Set initial mode visibility
         initial_mode = AppMode(self.settings.mode)
         if initial_mode == AppMode.OPEN_RANGE:
+            self._build_open_range_view_if_needed()
             self._show_open_range_ui()
         else:
             self._show_gspro_ui()
@@ -767,15 +772,14 @@ class GC2ConnectApp:
                 if self.gspro_client and self.gspro_client.is_connected:
                     self.shot_router.set_gspro_client(self.gspro_client)
                     await self.shot_router.route_shot(shot)
-                    ui.notify(f"Shot #{shot.shot_id} sent to GSPro", type="positive")
+                    logger.info(f"Shot #{shot.shot_id} sent to GSPro")
                 else:
-                    ui.notify("GSPro not connected", type="warning")
+                    logger.warning("GSPro not connected - shot not sent")
             else:
                 # Open Range mode - route to physics engine
                 await self.shot_router.route_shot(shot)
         except Exception as e:
             logger.error(f"Error routing shot: {e}")
-            ui.notify(f"Shot routing error: {e}", type="negative")
 
     def _on_status_received(self, status: GC2BallStatus) -> None:
         """Handle ball status update from the GC2."""
@@ -813,27 +817,29 @@ class GC2ConnectApp:
 
     async def _handle_mode_selector_change(self, mode: AppMode) -> None:
         """Handle mode change from ModeSelector UI component."""
+        # Update UI visibility first (while we have context)
+        if mode == AppMode.GSPRO:
+            self._show_gspro_ui()
+        else:
+            self._show_open_range_ui()
+
+        # Update router mode (this triggers _on_mode_change callback)
         await self.shot_router.set_mode(mode)
 
     async def _on_mode_change(self, mode: AppMode) -> None:
         """Handle mode change from shot router (callback)."""
         logger.info(f"Mode changed to: {mode.value}")
 
-        # Update settings
+        # Update settings (doesn't require UI context)
         self.settings.mode = mode.value
         self.save_settings()
 
-        # Update UI visibility
-        if mode == AppMode.GSPRO:
-            self._show_gspro_ui()
-        else:
-            self._show_open_range_ui()
-
-        ui.notify(f"Switched to {mode.value.replace('_', ' ').title()} mode", type="info")
+        # Note: UI visibility is handled in _handle_mode_selector_change
+        # to ensure we have proper NiceGUI context
 
     async def _on_open_range_result(self, result: ShotResult) -> None:
         """Handle shot result from Open Range simulation."""
-        logger.debug(
+        logger.info(
             f"Open Range result: carry={result.summary.carry_distance:.1f}yds, "
             f"total={result.summary.total_distance:.1f}yds"
         )
@@ -842,11 +848,26 @@ class GC2ConnectApp:
         if self.open_range_view is not None:
             await self.open_range_view.show_shot(result)
 
-        ui.notify(
-            f"Shot simulated: {result.summary.carry_distance:.0f}yds carry, "
-            f"{result.summary.total_distance:.0f}yds total",
-            type="positive",
-        )
+    def _build_open_range_view_if_needed(self) -> None:
+        """Build the Open Range view on first use.
+
+        Three.js scenes don't initialize properly in hidden containers,
+        so we defer building until the container is about to be shown.
+        """
+        if self._open_range_built:
+            return
+
+        if self._open_range_container is None:
+            return
+
+        logger.debug("Building Open Range view (first use)")
+
+        # Build the view inside the container
+        with self._open_range_container:
+            self.open_range_view = OpenRangeView()
+            self.open_range_view.build()
+
+        self._open_range_built = True
 
     def _show_gspro_ui(self) -> None:
         """Show GSPro mode UI, hide Open Range UI."""
@@ -857,6 +878,9 @@ class GC2ConnectApp:
 
     def _show_open_range_ui(self) -> None:
         """Show Open Range mode UI, hide GSPro UI."""
+        # Build the view if this is the first time showing it
+        self._build_open_range_view_if_needed()
+
         if self._gspro_content_column is not None:
             self._gspro_content_column.classes(add="hidden")
         if self._open_range_container is not None:
