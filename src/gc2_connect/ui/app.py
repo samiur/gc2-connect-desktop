@@ -996,6 +996,9 @@ def main() -> None:
         port=8080,
         reload=False,
         show=True,
+        native=True,  # Use native window instead of browser
+        window_size=(1400, 900),
+        fullscreen=False,
     )
 
 
