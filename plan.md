@@ -414,6 +414,125 @@ REQUIREMENTS:
 
 ---
 
+## Prompt 7b: GSPro Clean Disconnect Handling
+
+```text
+Implement clean disconnect handling for GSPro as described in docs/GSPRO_DISCONNECT.md.
+
+CONTEXT:
+- GSPro does not have a documented clean disconnect protocol
+- The recommended approach (from OpenSkyPlus2 reference) is:
+  1. Send a final heartbeat with LaunchMonitorIsReady = false
+  2. Flush the socket
+  3. Short delay (250ms)
+  4. Close the socket
+- This tells GSPro the launch monitor is going offline and gives it time to process
+
+CURRENT STATE:
+- GSProClient.disconnect() just closes the socket immediately
+- This can leave GSPro in a confused state about the launch monitor status
+- Clean disconnect is especially important when:
+  - User clicks "Disconnect" button
+  - Application is shutting down
+  - Switching between GSPro and Open Range modes
+
+TASK:
+
+1. First, write tests in tests/unit/test_gspro_disconnect.py:
+   - Test disconnect sends LaunchMonitorIsReady=false heartbeat
+   - Test disconnect flushes socket before closing
+   - Test disconnect waits 250ms after flush
+   - Test disconnect handles socket already closed
+   - Test disconnect handles send failures gracefully
+   - Test disconnect clears internal state properly
+   - Test async disconnect completes all steps
+
+2. Update src/gc2_connect/gspro/client.py:
+   - Create send_disconnect() method that sends the "not ready" heartbeat
+   - Update disconnect() method to call send_disconnect() first
+   - Add 250ms delay between send and socket close
+   - Handle errors gracefully (don't fail if socket already closed)
+   - Create async disconnect_async() method for use in async contexts
+
+3. Implementation details for disconnect():
+```python
+def disconnect(self) -> None:
+    """Cleanly disconnect from GSPro.
+
+    Following OpenSkyPlus2 reference implementation:
+    1. Send heartbeat with LaunchMonitorIsReady=false
+    2. Flush socket
+    3. Wait 250ms for GSPro to process
+    4. Close socket
+    """
+    if not self._socket:
+        self._connected = False
+        return
+
+    # Step 1: Tell GSPro we're going offline
+    try:
+        self._send_shutdown_heartbeat()
+    except Exception as e:
+        logger.debug(f"Error sending shutdown heartbeat: {e}")
+
+    # Step 2: Flush and wait
+    try:
+        self._socket.shutdown(socket.SHUT_WR)  # Flush write buffer
+        time.sleep(0.250)  # 250ms delay
+    except Exception as e:
+        logger.debug(f"Error during flush: {e}")
+
+    # Step 3: Close socket
+    try:
+        self._socket.close()
+    except Exception:
+        pass
+
+    # Step 4: Clear state
+    self._socket = None
+    self._connected = False
+    self._shot_number = 0
+    logger.info("Disconnected from GSPro (clean shutdown)")
+
+def _send_shutdown_heartbeat(self) -> None:
+    """Send final heartbeat indicating launch monitor is going offline."""
+    message = GSProShotMessage(
+        ShotNumber=self._shot_number,
+        ShotDataOptions=GSProShotOptions(
+            ContainsBallData=False,
+            ContainsClubData=False,
+            LaunchMonitorIsReady=False,  # Key: telling GSPro we're going offline
+            IsHeartBeat=True,
+        ),
+    )
+    json_data = json.dumps(message.to_dict())
+    self._socket.sendall(json_data.encode("utf-8"))
+```
+
+4. Create async version for app shutdown:
+```python
+async def disconnect_async(self) -> None:
+    """Async version of disconnect for use in async contexts."""
+    await asyncio.get_event_loop().run_in_executor(None, self.disconnect)
+```
+
+5. Update src/gc2_connect/ui/app.py shutdown handling:
+   - Use disconnect_async() in shutdown() where possible
+   - Ensure clean disconnect is called on all exit paths:
+     - User clicks Disconnect button (already calls disconnect)
+     - Application shutdown (shutdown() method)
+     - Mode switch (if applicable)
+
+REQUIREMENTS:
+- Disconnect should be graceful even if socket is already closed
+- Disconnect should not throw exceptions to caller
+- 250ms delay should be respected unless socket is already closed
+- All state should be cleared after disconnect
+- Run tests: uv run pytest tests/unit/test_gspro_disconnect.py -v
+```
+
+---
+
 ## Prompt 8: Auto-Reconnection Logic
 
 ```text
@@ -1966,6 +2085,7 @@ REQUIREMENTS:
 7. **Prompt 7**: Integrate settings into UI ✅
 
 ## Phase 3-4: Reliability & Features
+7b. **Prompt 7b**: GSPro clean disconnect handling ← NEW
 8. **Prompt 8**: Auto-reconnection logic
 9. **Prompt 9**: Integration tests
 10. **Prompt 10**: Shot history improvements

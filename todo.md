@@ -55,7 +55,16 @@ Target Release: v1.1.0 (with Open Range)
 
 ---
 
-## Phase 3: Reliability & Error Handling ✅
+## Phase 3: Reliability & Error Handling
+
+- [ ] **Prompt 7b**: GSPro Clean Disconnect Handling ← NEW
+  - [ ] Write tests for disconnect sequence
+  - [ ] Update GSProClient.disconnect() to send LaunchMonitorIsReady=false
+  - [ ] Add socket flush before close
+  - [ ] Add 250ms delay for GSPro to process
+  - [ ] Handle errors gracefully (socket already closed)
+  - [ ] Create disconnect_async() method
+  - [ ] Verify app shutdown uses clean disconnect
 
 - [x] **Prompt 8**: Auto-Reconnection Logic
   - [x] Write tests for reconnection
@@ -235,6 +244,7 @@ uv run python tools/mock_gspro_server.py
 
 ### Decisions Made
 
+- **GSPro Clean Disconnect (2026-01-14)**: Following OpenSkyPlus2 reference implementation. GSPro doesn't have a documented clean disconnect protocol, but the recommended approach is: (1) send heartbeat with LaunchMonitorIsReady=false, (2) flush socket, (3) wait 250ms, (4) close socket. This tells GSPro the launch monitor is going offline gracefully instead of just disappearing. See docs/GSPRO_DISCONNECT.md for details.
 - **0M Message Handling (2026-01-02)**: Added parsing of 0M messages for ball status. FLAGS=7 means ready (green light), BALLS>0 means ball detected. Status sent to GSPro via `LaunchMonitorIsReady` and `LaunchMonitorBallDetected` flags.
 - **Shot Validation (2026-01-02)**: Updated validation to match gc2_to_TGC: reject only when back_spin=0 AND side_spin=0 (not just total_spin=0). Also reject back_spin=2222 error code. Allow any positive ball speed (chip shots are valid).
 - **GSPro Socket Configuration (2026-01-03)**: Must use `TCP_NODELAY` socket option for immediate sends. Use `socket.create_connection()` for cleaner handling.
