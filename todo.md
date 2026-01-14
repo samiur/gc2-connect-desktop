@@ -57,14 +57,14 @@ Target Release: v1.1.0 (with Open Range)
 
 ## Phase 3: Reliability & Error Handling
 
-- [ ] **Prompt 7b**: GSPro Clean Disconnect Handling ← NEW
-  - [ ] Write tests for disconnect sequence
-  - [ ] Update GSProClient.disconnect() to send LaunchMonitorIsReady=false
-  - [ ] Add socket flush before close
-  - [ ] Add 250ms delay for GSPro to process
-  - [ ] Handle errors gracefully (socket already closed)
-  - [ ] Create disconnect_async() method
-  - [ ] Verify app shutdown uses clean disconnect
+- [x] **Prompt 7b**: GSPro Clean Disconnect Handling ← NEW
+  - [x] Write tests for disconnect sequence
+  - [x] Update GSProClient.disconnect() to send LaunchMonitorIsReady=false
+  - [x] Add socket flush before close
+  - [x] Add 250ms delay for GSPro to process
+  - [x] Handle errors gracefully (socket already closed)
+  - [x] Create disconnect_async() method
+  - [x] Verify app shutdown uses clean disconnect
 
 - [x] **Prompt 8**: Auto-Reconnection Logic
   - [x] Write tests for reconnection

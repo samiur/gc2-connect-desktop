@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import socket
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -108,15 +109,68 @@ class GSProClient:
             return False
 
     def disconnect(self) -> None:
-        """Disconnect from GSPro."""
-        if self._socket:
-            try:
-                self._socket.close()
-            except Exception:
-                pass
-            self._socket = None
+        """Cleanly disconnect from GSPro.
+
+        Following OpenSkyPlus2 reference implementation:
+        1. Send heartbeat with LaunchMonitorIsReady=false
+        2. Wait 250ms for GSPro to process
+        3. Close socket
+
+        This tells GSPro the launch monitor is going offline gracefully
+        instead of just disappearing. TCP_NODELAY ensures the heartbeat
+        is sent immediately without buffering.
+        """
+        if not self._socket:
+            self._connected = False
+            return
+
+        # Step 1: Tell GSPro we're going offline
+        try:
+            self._send_shutdown_heartbeat()
+        except Exception as e:
+            logger.debug(f"Error sending shutdown heartbeat: {e}")
+
+        # Step 2: Wait for GSPro to process the heartbeat
+        time.sleep(0.250)
+
+        # Step 3: Close socket
+        try:
+            self._socket.close()
+        except Exception:
+            pass
+
+        # Step 4: Clear internal state
+        self._socket = None
         self._connected = False
-        logger.info("Disconnected from GSPro")
+        self._shot_number = 0
+        self._current_player = None
+        logger.info("Disconnected from GSPro (clean shutdown)")
+
+    def _send_shutdown_heartbeat(self) -> None:
+        """Send final heartbeat indicating launch monitor is going offline.
+
+        This is sent without waiting for a response since GSPro doesn't
+        respond to heartbeats anyway.
+        """
+        if not self._socket:
+            return
+
+        message = GSProShotMessage(
+            ShotNumber=self._shot_number,
+            ShotDataOptions=GSProShotOptions(
+                ContainsBallData=False,
+                ContainsClubData=False,
+                LaunchMonitorIsReady=False,  # Key: telling GSPro we're going offline
+                IsHeartBeat=True,
+            ),
+        )
+        json_data = json.dumps(message.to_dict())
+        self._socket.sendall(json_data.encode("utf-8"))
+        logger.debug("Sent shutdown heartbeat (LaunchMonitorIsReady=false)")
+
+    async def disconnect_async(self) -> None:
+        """Async version of disconnect for use in async contexts."""
+        await asyncio.get_event_loop().run_in_executor(None, self.disconnect)
 
     async def connect_async(self) -> bool:
         """Async version of connect."""
