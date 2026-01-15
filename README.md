@@ -276,10 +276,26 @@ The project includes a comprehensive test simulator infrastructure for testing w
 
 See `CLAUDE.md` for detailed usage examples.
 
+## Building Standalone Apps
+
+Pre-built releases are available on the [Releases](https://github.com/samiur/gc2-connect-desktop/releases) page.
+
+To build from source, see [docs/BUILD.md](docs/BUILD.md) for detailed instructions.
+
+Quick build:
+```bash
+# macOS
+uv add pyinstaller pillow && uv run pyinstaller gc2connect.spec
+
+# Windows
+uv add pyinstaller pillow pythonnet && uv run pyinstaller gc2connect_windows.spec
+```
+
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md) - Version history
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Development guide
+- [docs/BUILD.md](docs/BUILD.md) - Building standalone executables
 - [docs/PRD.md](docs/PRD.md) - Product requirements
 - [docs/PRD_OPEN_RANGE.md](docs/PRD_OPEN_RANGE.md) - Open Range feature requirements
 - [docs/TRD.md](docs/TRD.md) - Technical requirements
