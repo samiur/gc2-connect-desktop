@@ -171,7 +171,6 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/GC2Connect.ico',  # Windows icon
-    version='file_version_info.txt',  # Optional: version info resource
 )
 
 coll = COLLECT(
