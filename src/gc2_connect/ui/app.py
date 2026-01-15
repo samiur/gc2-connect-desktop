@@ -982,6 +982,20 @@ def main_page() -> None:
     create_app()
 
 
+def _find_available_port(start_port: int = 8080, max_attempts: int = 100) -> int:
+    """Find an available port starting from start_port."""
+    import socket
+
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", port))
+                return port
+        except OSError:
+            continue
+    return start_port  # Fall back to start_port if nothing found
+
+
 def main() -> None:
     """Entry point."""
     # Register atexit handler as fallback
@@ -991,9 +1005,13 @@ def main() -> None:
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
+    # Find an available port (handles case where default port is in use)
+    port = _find_available_port(8080)
+    logger.info(f"Starting GC2 Connect on port {port}")
+
     ui.run(
         title="GC2 Connect",
-        port=8080,
+        port=port,
         reload=False,
         show=True,
         native=True,  # Use native window instead of browser
