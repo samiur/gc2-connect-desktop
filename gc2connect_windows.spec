@@ -154,16 +154,22 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# Single-file executable (onefile mode)
+# All dependencies are bundled into one .exe file
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='GC2Connect',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,  # Extract to temp dir at runtime
     console=False,  # No console window - GUI app
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -171,15 +177,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/GC2Connect.ico',  # Windows icon
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='GC2Connect',
 )

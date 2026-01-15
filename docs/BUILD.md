@@ -61,20 +61,16 @@ hdiutil create -volname "GC2Connect" -srcfolder dist/GC2Connect.app -ov -format 
 
 ### Windows
 
-The Windows build creates a folder containing the executable and all dependencies.
+The Windows build creates a single standalone `.exe` file with all dependencies bundled.
 
 **Requirements:**
 - Visual C++ Redistributable (usually already installed)
 - libusb-win32 or WinUSB driver for the GC2 device
 
 **Build output:**
-- `dist/GC2Connect/` - Folder containing the application
-- `dist/GC2Connect/GC2Connect.exe` - Main executable
+- `dist/GC2Connect.exe` - Single standalone executable
 
-**Creating a ZIP for distribution:**
-```powershell
-Compress-Archive -Path dist/GC2Connect -DestinationPath dist/GC2Connect-Windows.zip
-```
+**Note:** The single-exe mode extracts files to a temporary directory at runtime. First launch may be slightly slower as files are extracted.
 
 **Creating an installer (optional):**
 You can use [NSIS](https://nsis.sourceforge.io/) or [Inno Setup](https://jrsoftware.org/isinfo.php) to create a proper Windows installer.
