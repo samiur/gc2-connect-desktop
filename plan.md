@@ -533,6 +533,321 @@ REQUIREMENTS:
 
 ---
 
+## Prompt 7c: GSPro Response Reader Loop
+
+```text
+Implement a background reader loop to receive unsolicited messages from GSPro.
+
+CONTEXT:
+- GSPro sends messages asynchronously that we currently miss:
+  - Code 201: Player info (handedness, club, distance to target)
+  - Code 202: "GSPro is Ready" - match has started
+  - Code 203: "GSPro round ended" - match has ended
+- Currently we only read responses after sending shots
+- The OpenSkyPlus2 C# client has a dedicated ReadLoop that continuously reads from the socket
+- We need this to properly track match state for heartbeat timing
+
+CURRENT STATE:
+- GSProClient._send_message() reads response only when expect_response=True
+- Heartbeats and status messages don't wait for responses
+- No background task reading from the socket
+
+TASK:
+
+1. First, write tests in tests/unit/test_gspro_reader.py:
+   - Test reader loop starts when connected
+   - Test reader loop stops when disconnected
+   - Test code 201 response triggers player info callback
+   - Test code 202 response triggers match started callback
+   - Test code 203 response triggers match ended callback
+   - Test reader handles incomplete JSON (buffering)
+   - Test reader handles multiple JSON objects in one read
+   - Test reader handles connection loss gracefully
+
+2. Update src/gc2_connect/gspro/client.py:
+
+```python
+# Add new callbacks and state
+self._player_info_callbacks: list[Callable[[dict], None]] = []
+self._match_started_callbacks: list[Callable[[], None]] = []
+self._match_ended_callbacks: list[Callable[[], None]] = []
+self._reader_task: asyncio.Task | None = None
+self._reader_running = False
+
+def add_player_info_callback(self, callback: Callable[[dict], None]) -> None:
+    """Add callback for player info updates (code 201)."""
+    self._player_info_callbacks.append(callback)
+
+def add_match_started_callback(self, callback: Callable[[], None]) -> None:
+    """Add callback for match started events (code 202)."""
+    self._match_started_callbacks.append(callback)
+
+def add_match_ended_callback(self, callback: Callable[[], None]) -> None:
+    """Add callback for match ended events (code 203)."""
+    self._match_ended_callbacks.append(callback)
+
+async def _reader_loop(self) -> None:
+    """Background task that continuously reads from GSPro socket.
+
+    Handles response codes:
+    - 201: Player info update (handedness, club, distance)
+    - 202: GSPro is ready / match started
+    - 203: GSPro round ended
+    """
+    buffer = ""
+    while self._reader_running and self._connected and self._socket:
+        try:
+            # Set socket to non-blocking for async reads
+            self._socket.setblocking(False)
+            try:
+                data = self._socket.recv(4096)
+                if not data:
+                    # Connection closed
+                    break
+                buffer += data.decode('utf-8')
+
+                # Try to parse complete JSON objects
+                while buffer:
+                    try:
+                        decoder = json.JSONDecoder()
+                        response_json, idx = decoder.raw_decode(buffer)
+                        buffer = buffer[idx:].lstrip()
+                        self._handle_response(response_json)
+                    except json.JSONDecodeError:
+                        # Incomplete JSON, wait for more data
+                        break
+
+            except BlockingIOError:
+                # No data available, wait a bit
+                await asyncio.sleep(0.1)
+            finally:
+                self._socket.setblocking(True)
+
+        except Exception as e:
+            logger.error(f"Reader loop error: {e}")
+            break
+
+    logger.info("GSPro reader loop ended")
+
+def _handle_response(self, response_json: dict) -> None:
+    """Handle a response from GSPro based on code."""
+    code = response_json.get("Code", 0)
+
+    if code == 201:
+        # Player info update
+        player = response_json.get("Player", {})
+        if player:
+            for callback in self._player_info_callbacks:
+                try:
+                    callback(player)
+                except Exception as e:
+                    logger.error(f"Player info callback error: {e}")
+
+    elif code == 202:
+        # Match started
+        logger.info("GSPro match started (code 202)")
+        for callback in self._match_started_callbacks:
+            try:
+                callback()
+            except Exception as e:
+                logger.error(f"Match started callback error: {e}")
+
+    elif code == 203:
+        # Match ended
+        message = response_json.get("Message", "")
+        if "round ended" in message.lower():
+            logger.info("GSPro match ended (code 203)")
+            for callback in self._match_ended_callbacks:
+                try:
+                    callback()
+                except Exception as e:
+                    logger.error(f"Match ended callback error: {e}")
+
+def _start_reader_loop(self) -> None:
+    """Start the background reader loop."""
+    if self._reader_task is None or self._reader_task.done():
+        self._reader_running = True
+        self._reader_task = asyncio.create_task(self._reader_loop())
+
+def _stop_reader_loop(self) -> None:
+    """Stop the background reader loop."""
+    self._reader_running = False
+    if self._reader_task:
+        self._reader_task.cancel()
+        self._reader_task = None
+```
+
+3. Update connect() to start reader loop:
+   - After successful connection, call _start_reader_loop()
+
+4. Update disconnect() to stop reader loop:
+   - Before closing socket, call _stop_reader_loop()
+   - Wait briefly for reader to stop cleanly
+
+5. Update _send_message() to not conflict with reader:
+   - When expect_response=True, temporarily pause reader
+   - Or: let reader handle all responses and use a queue
+
+REQUIREMENTS:
+- Reader loop must not block the event loop
+- Reader must handle partial JSON gracefully
+- Reader must stop cleanly on disconnect
+- Callbacks must not throw exceptions to reader
+- Run tests: uv run pytest tests/unit/test_gspro_reader.py -v
+```
+
+---
+
+## Prompt 7d: GSPro Match State and Heartbeat Timer
+
+```text
+Implement match state tracking and periodic heartbeat timer based on GSPro responses.
+
+CONTEXT:
+- OpenSkyPlus2 sends heartbeats every 6 seconds while a match is active
+- Match state is determined by GSPro responses:
+  - Code 202 received -> match started -> start heartbeat timer
+  - Code 203 received -> match ended -> stop heartbeat timer
+- Heartbeats keep GSPro aware that the launch monitor is still connected
+- We only report LaunchMonitorIsReady=true when BOTH:
+  - GC2 hardware is ready (connected and green light)
+  - GSPro match is active (received code 202)
+
+CURRENT STATE:
+- We send one heartbeat on connect
+- No periodic heartbeats
+- No match state tracking
+- Always report ready if GC2 is ready
+
+TASK:
+
+1. First, write tests in tests/unit/test_gspro_heartbeat.py:
+   - Test heartbeat timer starts on match started (code 202)
+   - Test heartbeat timer stops on match ended (code 203)
+   - Test heartbeat timer stops on disconnect
+   - Test heartbeats sent at 6 second intervals
+   - Test heartbeat includes current ready state
+   - Test ready state is false when match not started (even if GC2 ready)
+   - Test ready state is true only when match started AND GC2 ready
+
+2. Update src/gc2_connect/gspro/client.py:
+
+```python
+# Add heartbeat timer and match state
+HEARTBEAT_INTERVAL_SECONDS = 6.0
+
+self._match_started = False
+self._hardware_ready = False
+self._heartbeat_task: asyncio.Task | None = None
+
+@property
+def match_started(self) -> bool:
+    """Whether GSPro match is currently active."""
+    return self._match_started
+
+@property
+def is_ready_to_report(self) -> bool:
+    """Whether we should report LaunchMonitorIsReady=true.
+
+    Only true when both:
+    - GC2 hardware is ready (green light)
+    - GSPro match is active
+    """
+    return self._hardware_ready and self._match_started
+
+def set_hardware_ready(self, ready: bool) -> None:
+    """Update hardware ready state from GC2.
+
+    Called when GC2 status changes (FLAGS in 0M message).
+    """
+    if self._hardware_ready != ready:
+        self._hardware_ready = ready
+        # Send status update if match is active
+        if self._match_started:
+            self._send_ready_status()
+
+def _on_match_started(self) -> None:
+    """Handle match started event (code 202)."""
+    if not self._match_started:
+        self._match_started = True
+        self._start_heartbeat_timer()
+        self._send_ready_status()
+
+def _on_match_ended(self) -> None:
+    """Handle match ended event (code 203)."""
+    if self._match_started:
+        self._match_started = False
+        self._stop_heartbeat_timer()
+        # Note: Don't send "not ready" here, just stop heartbeats
+        # The disconnect sequence handles the final "not ready"
+
+def _start_heartbeat_timer(self) -> None:
+    """Start periodic heartbeat timer."""
+    self._stop_heartbeat_timer()  # Stop any existing timer
+    self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+    logger.info("GSPro heartbeat timer started")
+
+def _stop_heartbeat_timer(self) -> None:
+    """Stop the heartbeat timer."""
+    if self._heartbeat_task:
+        self._heartbeat_task.cancel()
+        self._heartbeat_task = None
+        logger.info("GSPro heartbeat timer stopped")
+
+async def _heartbeat_loop(self) -> None:
+    """Send heartbeats at regular intervals while match is active."""
+    while self._connected and self._match_started:
+        await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+        if self._connected and self._match_started:
+            self.send_heartbeat()
+
+def _send_ready_status(self) -> None:
+    """Send current ready status to GSPro."""
+    # Uses is_ready_to_report which checks both hardware and match state
+    self.send_heartbeat()
+```
+
+3. Update send_heartbeat() to use is_ready_to_report:
+```python
+def send_heartbeat(self) -> GSProResponse | None:
+    """Send a heartbeat to GSPro."""
+    if not self._connected or not self._socket:
+        return None
+
+    message = GSProShotMessage(
+        ShotNumber=self._shot_number,
+        ShotDataOptions=GSProShotOptions(
+            ContainsBallData=False,
+            ContainsClubData=False,
+            LaunchMonitorIsReady=self.is_ready_to_report,  # Use combined state
+            IsHeartBeat=True,
+        ),
+    )
+    return self._send_message(message, expect_response=False)
+```
+
+4. Wire up match state callbacks in __init__ or connect():
+   - Register _on_match_started as match_started_callback
+   - Register _on_match_ended as match_ended_callback
+
+5. Update disconnect() to stop heartbeat timer:
+   - Call _stop_heartbeat_timer() before sending shutdown heartbeat
+   - Set _match_started = False
+
+6. Update src/gc2_connect/ui/app.py:
+   - When GC2 status changes (is_ready), call gspro_client.set_hardware_ready()
+   - This ensures GSPro gets accurate ready state based on GC2 status
+
+REQUIREMENTS:
+- Heartbeats only sent during active match
+- Heartbeat interval is 6 seconds (matching OpenSkyPlus2)
+- Ready state reflects both hardware AND match state
+- Timer stops cleanly on disconnect or match end
+- Run tests: uv run pytest tests/unit/test_gspro_heartbeat.py -v
+```
+
+---
+
 ## Prompt 8: Auto-Reconnection Logic
 
 ```text
@@ -2085,11 +2400,13 @@ REQUIREMENTS:
 7. **Prompt 7**: Integrate settings into UI ✅
 
 ## Phase 3-4: Reliability & Features
-7b. **Prompt 7b**: GSPro clean disconnect handling ← NEW
-8. **Prompt 8**: Auto-reconnection logic
-9. **Prompt 9**: Integration tests
-10. **Prompt 10**: Shot history improvements
-11. **Prompt 11**: CSV export
+7b. **Prompt 7b**: GSPro clean disconnect handling ✅
+7c. **Prompt 7c**: GSPro response reader loop ← CURRENT
+7d. **Prompt 7d**: GSPro match state and heartbeat timer
+8. **Prompt 8**: Auto-reconnection logic ✅
+9. **Prompt 9**: Integration tests ✅
+10. **Prompt 10**: Shot history improvements ✅
+11. **Prompt 11**: CSV export ✅
 
 ## Phase 5: Open Range Feature
 12. **Prompt 12**: Open Range data models & constants

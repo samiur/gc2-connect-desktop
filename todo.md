@@ -57,7 +57,7 @@ Target Release: v1.1.0 (with Open Range)
 
 ## Phase 3: Reliability & Error Handling
 
-- [x] **Prompt 7b**: GSPro Clean Disconnect Handling ← NEW
+- [x] **Prompt 7b**: GSPro Clean Disconnect Handling
   - [x] Write tests for disconnect sequence
   - [x] Update GSProClient.disconnect() to send LaunchMonitorIsReady=false
   - [x] Add socket flush before close
@@ -65,6 +65,29 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Handle errors gracefully (socket already closed)
   - [x] Create disconnect_async() method
   - [x] Verify app shutdown uses clean disconnect
+
+- [x] **Prompt 7c**: GSPro Response Reader Loop ✅
+  - [x] Write tests in tests/unit/test_gspro_reader.py
+  - [x] Add reader loop that continuously reads from GSPro socket
+  - [x] Handle code 201 (player info) with callback
+  - [x] Handle code 202 (match started) with callback
+  - [x] Handle code 203 (match ended) with callback
+  - [x] Handle incomplete JSON buffering
+  - [x] Handle multiple JSON objects in one read
+  - [x] Start reader loop on connect
+  - [x] Stop reader loop on disconnect
+
+- [ ] **Prompt 7d**: GSPro Match State and Heartbeat Timer ← NEXT
+  - [ ] Write tests in tests/unit/test_gspro_heartbeat.py
+  - [ ] Add match_started state tracking
+  - [ ] Add hardware_ready state tracking
+  - [ ] Implement is_ready_to_report property (hardware AND match)
+  - [ ] Start heartbeat timer on code 202 (match started)
+  - [ ] Stop heartbeat timer on code 203 (match ended)
+  - [ ] Send heartbeats every 6 seconds during active match
+  - [ ] Update send_heartbeat() to use is_ready_to_report
+  - [ ] Wire GC2 status changes to set_hardware_ready()
+  - [ ] Stop heartbeat timer on disconnect
 
 - [x] **Prompt 8**: Auto-Reconnection Logic
   - [x] Write tests for reconnection
@@ -244,6 +267,7 @@ uv run python tools/mock_gspro_server.py
 
 ### Decisions Made
 
+- **GSPro Response Reader and Heartbeat Timer (2026-01-15)**: After analyzing the OpenSkyPlus2 C# client (docs/GsProApi.cs), identified key missing features: (1) Background reader loop to receive unsolicited GSPro messages (codes 201, 202, 203), (2) Match state tracking based on code 202/203 responses, (3) Periodic heartbeat timer (6 second intervals) that only runs during active matches, (4) Combined ready state logic (hardware_ready AND match_started). These changes will make our client behave more like the reference implementation and improve GSPro compatibility.
 - **GSPro Clean Disconnect (2026-01-14)**: Following OpenSkyPlus2 reference implementation. GSPro doesn't have a documented clean disconnect protocol, but the recommended approach is: (1) send heartbeat with LaunchMonitorIsReady=false, (2) flush socket, (3) wait 250ms, (4) close socket. This tells GSPro the launch monitor is going offline gracefully instead of just disappearing. See docs/GSPRO_DISCONNECT.md for details.
 - **0M Message Handling (2026-01-02)**: Added parsing of 0M messages for ball status. FLAGS=7 means ready (green light), BALLS>0 means ball detected. Status sent to GSPro via `LaunchMonitorIsReady` and `LaunchMonitorBallDetected` flags.
 - **Shot Validation (2026-01-02)**: Updated validation to match gc2_to_TGC: reject only when back_spin=0 AND side_spin=0 (not just total_spin=0). Also reject back_spin=2222 error code. Allow any positive ball speed (chip shots are valid).
