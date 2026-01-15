@@ -894,6 +894,10 @@ class GC2ConnectApp:
         """
         logger.info("Shutting down GC2 Connect...")
 
+        # Stop sending status updates to GSPro immediately to ensure
+        # no messages are sent after the shutdown heartbeat
+        self.send_status_to_gspro = False
+
         # Cancel reconnection managers and tasks first
         self._gc2_reconnect_mgr.cancel()
         self._gspro_reconnect_mgr.cancel()
