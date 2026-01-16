@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Generator
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -13,65 +14,87 @@ import pytest
 from gc2_connect.gspro.client import GSProClient
 
 
+@pytest.fixture
+def connected_client() -> Generator[GSProClient, None, None]:
+    """Create a GSProClient configured for reader loop testing."""
+    client = GSProClient()
+    client._connected = True
+    client._reader_running = True
+    client._socket = MagicMock()
+    yield client
+
+
+def get_mock_socket(client: GSProClient) -> MagicMock:
+    """Get the mock socket from a test client."""
+    return client._socket  # type: ignore[return-value]
+
+
+def create_socket_recv_sequence(client: GSProClient, *responses: bytes) -> Callable[[int], bytes]:
+    """Create a recv side effect that returns responses in sequence, then stops the loop.
+
+    After all responses are returned, raises BlockingIOError and stops the reader loop.
+    """
+    response_iter = iter(responses)
+
+    def recv_side_effect(_size: int) -> bytes:
+        try:
+            return next(response_iter)
+        except StopIteration:
+            client._reader_running = False
+            raise BlockingIOError() from None
+
+    return recv_side_effect
+
+
 class TestGSProReaderCallbacks:
     """Test callback registration and management."""
 
-    def test_add_player_info_callback(self) -> None:
-        """Test adding a player info callback."""
+    @pytest.mark.parametrize(
+        "add_method,list_attr",
+        [
+            ("add_player_info_callback", "_player_info_callbacks"),
+            ("add_match_started_callback", "_match_started_callbacks"),
+            ("add_match_ended_callback", "_match_ended_callbacks"),
+        ],
+    )
+    def test_add_callback(self, add_method: str, list_attr: str) -> None:
+        """Test adding callbacks for each event type."""
         client = GSProClient()
         callback = MagicMock()
 
-        client.add_player_info_callback(callback)
+        getattr(client, add_method)(callback)
 
-        assert callback in client._player_info_callbacks
+        assert callback in getattr(client, list_attr)
 
-    def test_add_match_started_callback(self) -> None:
-        """Test adding a match started callback."""
+    @pytest.mark.parametrize(
+        "add_method,remove_method,list_attr",
+        [
+            (
+                "add_player_info_callback",
+                "remove_player_info_callback",
+                "_player_info_callbacks",
+            ),
+            (
+                "add_match_started_callback",
+                "remove_match_started_callback",
+                "_match_started_callbacks",
+            ),
+            (
+                "add_match_ended_callback",
+                "remove_match_ended_callback",
+                "_match_ended_callbacks",
+            ),
+        ],
+    )
+    def test_remove_callback(self, add_method: str, remove_method: str, list_attr: str) -> None:
+        """Test removing callbacks for each event type."""
         client = GSProClient()
         callback = MagicMock()
 
-        client.add_match_started_callback(callback)
+        getattr(client, add_method)(callback)
+        getattr(client, remove_method)(callback)
 
-        assert callback in client._match_started_callbacks
-
-    def test_add_match_ended_callback(self) -> None:
-        """Test adding a match ended callback."""
-        client = GSProClient()
-        callback = MagicMock()
-
-        client.add_match_ended_callback(callback)
-
-        assert callback in client._match_ended_callbacks
-
-    def test_remove_player_info_callback(self) -> None:
-        """Test removing a player info callback."""
-        client = GSProClient()
-        callback = MagicMock()
-
-        client.add_player_info_callback(callback)
-        client.remove_player_info_callback(callback)
-
-        assert callback not in client._player_info_callbacks
-
-    def test_remove_match_started_callback(self) -> None:
-        """Test removing a match started callback."""
-        client = GSProClient()
-        callback = MagicMock()
-
-        client.add_match_started_callback(callback)
-        client.remove_match_started_callback(callback)
-
-        assert callback not in client._match_started_callbacks
-
-    def test_remove_match_ended_callback(self) -> None:
-        """Test removing a match ended callback."""
-        client = GSProClient()
-        callback = MagicMock()
-
-        client.add_match_ended_callback(callback)
-        client.remove_match_ended_callback(callback)
-
-        assert callback not in client._match_ended_callbacks
+        assert callback not in getattr(client, list_attr)
 
     def test_remove_nonexistent_callback_no_error(self) -> None:
         """Test removing a callback that was never added doesn't raise."""
@@ -277,192 +300,115 @@ class TestReaderLoop:
     """Test the reader loop behavior."""
 
     @pytest.mark.asyncio
-    async def test_reader_loop_processes_single_json_object(self) -> None:
+    async def test_reader_loop_processes_single_json_object(
+        self, connected_client: GSProClient
+    ) -> None:
         """Test reader loop processes a single JSON object."""
-        client = GSProClient()
-        client._connected = True
-        client._reader_running = True
-
         callback = MagicMock()
-        client.add_match_started_callback(callback)
+        connected_client.add_match_started_callback(callback)
 
-        # Mock socket
-        mock_socket = MagicMock()
-        response_json = json.dumps({"Code": 202, "Message": "GSPro is Ready"})
+        response = json.dumps({"Code": 202, "Message": "GSPro is Ready"}).encode()
+        mock_socket = get_mock_socket(connected_client)
+        mock_socket.recv.side_effect = create_socket_recv_sequence(connected_client, response)
 
-        # Socket returns data once, then raises BlockingIOError, then we stop
-        call_count = 0
-
-        def recv_side_effect(_size: int) -> bytes:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return response_json.encode("utf-8")
-            # Stop the loop after processing
-            client._reader_running = False
-            raise BlockingIOError()
-
-        mock_socket.recv.side_effect = recv_side_effect
-        client._socket = mock_socket
-
-        # Run reader loop
-        await client._reader_loop()
+        await connected_client._reader_loop()
 
         callback.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_reader_loop_handles_multiple_json_objects(self) -> None:
+    async def test_reader_loop_handles_multiple_json_objects(
+        self, connected_client: GSProClient
+    ) -> None:
         """Test reader loop processes multiple JSON objects in one read."""
-        client = GSProClient()
-        client._connected = True
-        client._reader_running = True
-
         callback_202 = MagicMock()
         callback_201 = MagicMock()
-        client.add_match_started_callback(callback_202)
-        client.add_player_info_callback(callback_201)
+        connected_client.add_match_started_callback(callback_202)
+        connected_client.add_player_info_callback(callback_201)
 
-        mock_socket = MagicMock()
-        # Two JSON objects concatenated
         response1 = {"Code": 202, "Message": "GSPro is Ready"}
         response2 = {"Code": 201, "Player": {"Club": "DR"}}
-        combined = json.dumps(response1) + json.dumps(response2)
+        combined = (json.dumps(response1) + json.dumps(response2)).encode()
+        mock_socket = get_mock_socket(connected_client)
+        mock_socket.recv.side_effect = create_socket_recv_sequence(connected_client, combined)
 
-        call_count = 0
-
-        def recv_side_effect(_size: int) -> bytes:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return combined.encode("utf-8")
-            client._reader_running = False
-            raise BlockingIOError()
-
-        mock_socket.recv.side_effect = recv_side_effect
-        client._socket = mock_socket
-
-        await client._reader_loop()
+        await connected_client._reader_loop()
 
         callback_202.assert_called_once()
         callback_201.assert_called_once_with({"Club": "DR"})
 
     @pytest.mark.asyncio
-    async def test_reader_loop_handles_incomplete_json(self) -> None:
+    async def test_reader_loop_handles_incomplete_json(self, connected_client: GSProClient) -> None:
         """Test reader loop buffers incomplete JSON until complete."""
-        client = GSProClient()
-        client._connected = True
-        client._reader_running = True
-
         callback = MagicMock()
-        client.add_match_started_callback(callback)
+        connected_client.add_match_started_callback(callback)
 
-        mock_socket = MagicMock()
-
-        # Split JSON across two reads
         full_json = json.dumps({"Code": 202, "Message": "GSPro is Ready"})
-        part1 = full_json[:10]
-        part2 = full_json[10:]
+        part1 = full_json[:10].encode()
+        part2 = full_json[10:].encode()
+        mock_socket = get_mock_socket(connected_client)
+        mock_socket.recv.side_effect = create_socket_recv_sequence(connected_client, part1, part2)
 
-        call_count = 0
-
-        def recv_side_effect(_size: int) -> bytes:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return part1.encode("utf-8")
-            if call_count == 2:
-                return part2.encode("utf-8")
-            client._reader_running = False
-            raise BlockingIOError()
-
-        mock_socket.recv.side_effect = recv_side_effect
-        client._socket = mock_socket
-
-        await client._reader_loop()
+        await connected_client._reader_loop()
 
         callback.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_reader_loop_stops_on_connection_closed(self) -> None:
+    async def test_reader_loop_stops_on_connection_closed(
+        self, connected_client: GSProClient
+    ) -> None:
         """Test reader loop stops when connection is closed (empty recv)."""
-        client = GSProClient()
-        client._connected = True
-        client._reader_running = True
+        mock_socket = get_mock_socket(connected_client)
+        mock_socket.recv.return_value = b""
 
-        mock_socket = MagicMock()
-        mock_socket.recv.return_value = b""  # Empty = connection closed
-        client._socket = mock_socket
-
-        await client._reader_loop()
-
-        # Loop should have exited
-        assert True  # If we get here, loop exited properly
+        await connected_client._reader_loop()
+        # If we get here, loop exited properly
 
     @pytest.mark.asyncio
-    async def test_reader_loop_stops_on_socket_error(self) -> None:
+    async def test_reader_loop_stops_on_socket_error(self, connected_client: GSProClient) -> None:
         """Test reader loop stops gracefully on socket error."""
-        client = GSProClient()
-        client._connected = True
-        client._reader_running = True
-
-        mock_socket = MagicMock()
+        mock_socket = get_mock_socket(connected_client)
         mock_socket.recv.side_effect = OSError("Connection reset")
-        client._socket = mock_socket
 
-        # Should not raise
-        await client._reader_loop()
-
-        # Loop should have exited
-        assert True
+        await connected_client._reader_loop()
+        # If we get here, loop exited properly without raising
 
     @pytest.mark.asyncio
-    async def test_reader_loop_stops_when_running_flag_cleared(self) -> None:
+    async def test_reader_loop_stops_when_running_flag_cleared(
+        self, connected_client: GSProClient
+    ) -> None:
         """Test reader loop stops when running flag is cleared."""
-        client = GSProClient()
-        client._connected = True
-        client._reader_running = True
-
-        mock_socket = MagicMock()
         call_count = 0
 
         def recv_side_effect(_size: int) -> bytes:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                # Clear the flag to stop the loop
-                client._reader_running = False
+                connected_client._reader_running = False
             raise BlockingIOError()
 
+        mock_socket = get_mock_socket(connected_client)
         mock_socket.recv.side_effect = recv_side_effect
-        client._socket = mock_socket
 
-        await client._reader_loop()
+        await connected_client._reader_loop()
 
-        # Should have exited after flag was cleared
         assert call_count >= 1
 
     @pytest.mark.asyncio
-    async def test_reader_loop_stops_when_disconnected(self) -> None:
+    async def test_reader_loop_stops_when_disconnected(self, connected_client: GSProClient) -> None:
         """Test reader loop stops when client is disconnected."""
-        client = GSProClient()
-        client._connected = True
-        client._reader_running = True
-
-        mock_socket = MagicMock()
         call_count = 0
 
         def recv_side_effect(_size: int) -> bytes:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                # Disconnect
-                client._connected = False
+                connected_client._connected = False
             raise BlockingIOError()
 
+        mock_socket = get_mock_socket(connected_client)
         mock_socket.recv.side_effect = recv_side_effect
-        client._socket = mock_socket
 
-        await client._reader_loop()
+        await connected_client._reader_loop()
 
         assert call_count >= 1
 

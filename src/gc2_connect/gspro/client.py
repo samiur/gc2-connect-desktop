@@ -22,6 +22,16 @@ from gc2_connect.models import (
 
 logger = logging.getLogger(__name__)
 
+
+def _notify_callbacks(callbacks: list[Callable[..., None]], *args: Any) -> None:
+    """Invoke all callbacks with the given arguments, logging any errors."""
+    for callback in callbacks:
+        try:
+            callback(*args)
+        except Exception as e:
+            logger.error(f"Callback error: {e}")
+
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 921
 
@@ -70,11 +80,7 @@ class GSProClient:
 
     def _notify_response(self, response: GSProResponse) -> None:
         """Notify all callbacks of a response."""
-        for callback in self._response_callbacks:
-            try:
-                callback(response)
-            except Exception as e:
-                logger.error(f"Response callback error: {e}")
+        _notify_callbacks(self._response_callbacks, response)
 
     def add_disconnect_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback for connection loss events."""
@@ -87,11 +93,7 @@ class GSProClient:
 
     def _notify_disconnect(self) -> None:
         """Notify all callbacks of a disconnection."""
-        for callback in self._disconnect_callbacks:
-            try:
-                callback()
-            except Exception as e:
-                logger.error(f"Disconnect callback error: {e}")
+        _notify_callbacks(self._disconnect_callbacks)
 
     # -------------------------------------------------------------------------
     # Reader loop callback management
@@ -139,35 +141,20 @@ class GSProClient:
         code = response_json.get("Code", 0)
 
         if code == 201:
-            # Player info update
             player = response_json.get("Player", {})
             if player:
                 logger.debug(f"Received player info: {player}")
-                for player_cb in self._player_info_callbacks:
-                    try:
-                        player_cb(player)
-                    except Exception as e:
-                        logger.error(f"Player info callback error: {e}")
+                _notify_callbacks(self._player_info_callbacks, player)
 
         elif code == 202:
-            # Match started
             logger.info("GSPro match started (code 202)")
-            for started_cb in self._match_started_callbacks:
-                try:
-                    started_cb()
-                except Exception as e:
-                    logger.error(f"Match started callback error: {e}")
+            _notify_callbacks(self._match_started_callbacks)
 
         elif code == 203:
-            # Match ended - only trigger on "round ended" message
             message = response_json.get("Message", "")
             if "round ended" in message.lower():
                 logger.info("GSPro match ended (code 203)")
-                for ended_cb in self._match_ended_callbacks:
-                    try:
-                        ended_cb()
-                    except Exception as e:
-                        logger.error(f"Match ended callback error: {e}")
+                _notify_callbacks(self._match_ended_callbacks)
 
     async def _reader_loop(self) -> None:
         """Background task that continuously reads from GSPro socket.
