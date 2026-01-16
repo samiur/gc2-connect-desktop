@@ -22,6 +22,16 @@ from gc2_connect.models import (
 
 logger = logging.getLogger(__name__)
 
+
+def _notify_callbacks(callbacks: list[Callable[..., None]], *args: Any) -> None:
+    """Invoke all callbacks with the given arguments, logging any errors."""
+    for callback in callbacks:
+        try:
+            callback(*args)
+        except Exception as e:
+            logger.error(f"Callback error: {e}")
+
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 921
 
@@ -38,6 +48,15 @@ class GSProClient:
         self._current_player: dict[str, Any] | None = None
         self._response_callbacks: list[Callable[[GSProResponse], None]] = []
         self._disconnect_callbacks: list[Callable[[], None]] = []
+
+        # Reader loop callbacks for GSPro responses
+        self._player_info_callbacks: list[Callable[[dict[str, Any]], None]] = []
+        self._match_started_callbacks: list[Callable[[], None]] = []
+        self._match_ended_callbacks: list[Callable[[], None]] = []
+
+        # Reader loop state
+        self._reader_task: asyncio.Task[None] | None = None
+        self._reader_running = False
 
     @property
     def is_connected(self) -> bool:
@@ -61,11 +80,7 @@ class GSProClient:
 
     def _notify_response(self, response: GSProResponse) -> None:
         """Notify all callbacks of a response."""
-        for callback in self._response_callbacks:
-            try:
-                callback(response)
-            except Exception as e:
-                logger.error(f"Response callback error: {e}")
+        _notify_callbacks(self._response_callbacks, response)
 
     def add_disconnect_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback for connection loss events."""
@@ -78,11 +93,149 @@ class GSProClient:
 
     def _notify_disconnect(self) -> None:
         """Notify all callbacks of a disconnection."""
-        for callback in self._disconnect_callbacks:
+        _notify_callbacks(self._disconnect_callbacks)
+
+    # -------------------------------------------------------------------------
+    # Reader loop callback management
+    # -------------------------------------------------------------------------
+
+    def add_player_info_callback(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        """Add callback for player info updates (code 201)."""
+        self._player_info_callbacks.append(callback)
+
+    def remove_player_info_callback(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        """Remove a player info callback."""
+        if callback in self._player_info_callbacks:
+            self._player_info_callbacks.remove(callback)
+
+    def add_match_started_callback(self, callback: Callable[[], None]) -> None:
+        """Add callback for match started events (code 202)."""
+        self._match_started_callbacks.append(callback)
+
+    def remove_match_started_callback(self, callback: Callable[[], None]) -> None:
+        """Remove a match started callback."""
+        if callback in self._match_started_callbacks:
+            self._match_started_callbacks.remove(callback)
+
+    def add_match_ended_callback(self, callback: Callable[[], None]) -> None:
+        """Add callback for match ended events (code 203)."""
+        self._match_ended_callbacks.append(callback)
+
+    def remove_match_ended_callback(self, callback: Callable[[], None]) -> None:
+        """Remove a match ended callback."""
+        if callback in self._match_ended_callbacks:
+            self._match_ended_callbacks.remove(callback)
+
+    # -------------------------------------------------------------------------
+    # Reader loop for receiving unsolicited GSPro messages
+    # -------------------------------------------------------------------------
+
+    def _handle_response(self, response_json: dict[str, Any]) -> None:
+        """Handle a response from GSPro based on code.
+
+        Handles response codes:
+        - 201: Player info update (handedness, club, distance)
+        - 202: GSPro is ready / match started
+        - 203: GSPro round ended
+        """
+        code = response_json.get("Code", 0)
+
+        if code == 201:
+            player = response_json.get("Player", {})
+            if player:
+                logger.debug(f"Received player info: {player}")
+                _notify_callbacks(self._player_info_callbacks, player)
+
+        elif code == 202:
+            logger.info("GSPro match started (code 202)")
+            _notify_callbacks(self._match_started_callbacks)
+
+        elif code == 203:
+            message = response_json.get("Message", "")
+            if "round ended" in message.lower():
+                logger.info("GSPro match ended (code 203)")
+                _notify_callbacks(self._match_ended_callbacks)
+
+    async def _reader_loop(self) -> None:
+        """Background task that continuously reads from GSPro socket.
+
+        This loop handles unsolicited messages from GSPro such as:
+        - Code 201: Player info updates
+        - Code 202: Match started
+        - Code 203: Match ended
+        """
+        buffer = ""
+        logger.debug("GSPro reader loop started")
+
+        while self._reader_running and self._connected and self._socket:
             try:
-                callback()
+                # Set socket to non-blocking for async reads
+                self._socket.setblocking(False)
+                try:
+                    data = self._socket.recv(4096)
+                    if not data:
+                        # Connection closed
+                        logger.warning("GSPro connection closed (empty recv)")
+                        break
+                    buffer += data.decode("utf-8")
+
+                    # Try to parse complete JSON objects
+                    while buffer:
+                        try:
+                            decoder = json.JSONDecoder()
+                            response_json, idx = decoder.raw_decode(buffer)
+                            buffer = buffer[idx:].lstrip()
+                            self._handle_response(response_json)
+                        except json.JSONDecodeError:
+                            # Incomplete JSON, wait for more data
+                            break
+
+                except BlockingIOError:
+                    # No data available, wait a bit
+                    await asyncio.sleep(0.1)
+                finally:
+                    if self._socket:
+                        self._socket.setblocking(True)
+
+            except OSError as e:
+                logger.error(f"Reader loop socket error: {e}")
+                break
             except Exception as e:
-                logger.error(f"Disconnect callback error: {e}")
+                logger.error(f"Reader loop error: {e}")
+                break
+
+        logger.info("GSPro reader loop ended")
+
+    def _start_reader_loop(self) -> None:
+        """Start the background reader loop.
+
+        This attempts to create an async task for the reader loop. If no event
+        loop is running (e.g., in synchronous-only contexts or tests), it will
+        log a debug message and skip starting the reader.
+        """
+        if self._reader_task is not None and not self._reader_task.done():
+            return  # Already running
+
+        try:
+            self._reader_running = True
+            self._reader_task = asyncio.create_task(self._reader_loop())
+            logger.debug("Started GSPro reader loop task")
+        except RuntimeError as e:
+            # No running event loop - this happens in sync-only contexts
+            logger.debug(f"Could not start reader loop (no event loop): {e}")
+            self._reader_running = False
+
+    def _stop_reader_loop(self) -> None:
+        """Stop the background reader loop."""
+        self._reader_running = False
+        if self._reader_task:
+            self._reader_task.cancel()
+            self._reader_task = None
+            logger.debug("Stopped GSPro reader loop task")
+
+    # -------------------------------------------------------------------------
+    # Connection management
+    # -------------------------------------------------------------------------
 
     def connect(self) -> bool:
         """Connect to GSPro."""
@@ -101,6 +254,9 @@ class GSProClient:
             self.send_heartbeat()
             logger.info("Initial heartbeat sent")
 
+            # Start background reader loop for unsolicited GSPro messages
+            self._start_reader_loop()
+
             return True
         except OSError as e:
             logger.error(f"Failed to connect to GSPro: {e}")
@@ -112,9 +268,10 @@ class GSProClient:
         """Cleanly disconnect from GSPro.
 
         Following OpenSkyPlus2 reference implementation:
-        1. Send heartbeat with LaunchMonitorIsReady=false
-        2. Wait 250ms for GSPro to process
-        3. Close socket
+        1. Stop reader loop (prevent any more reads)
+        2. Send heartbeat with LaunchMonitorIsReady=false
+        3. Wait 250ms for GSPro to process
+        4. Close socket
 
         This tells GSPro the launch monitor is going offline gracefully
         instead of just disappearing. TCP_NODELAY ensures the heartbeat
@@ -124,22 +281,25 @@ class GSProClient:
             self._connected = False
             return
 
-        # Step 1: Tell GSPro we're going offline
+        # Step 1: Stop the reader loop first
+        self._stop_reader_loop()
+
+        # Step 2: Tell GSPro we're going offline
         try:
             self._send_shutdown_heartbeat()
         except Exception as e:
             logger.debug(f"Error sending shutdown heartbeat: {e}")
 
-        # Step 2: Wait for GSPro to process the heartbeat
+        # Step 3: Wait for GSPro to process the heartbeat
         time.sleep(0.250)
 
-        # Step 3: Close socket
+        # Step 4: Close socket
         try:
             self._socket.close()
         except Exception:
             pass
 
-        # Step 4: Clear internal state
+        # Step 5: Clear internal state
         self._socket = None
         self._connected = False
         self._shot_number = 0
