@@ -127,9 +127,10 @@ class TestGSProConnectionErrors:
             mock_connect.return_value = False
             await app._connect_gspro()
 
-        # Client should exist but not be connected
-        assert app.gspro_client is not None
-        # Since mock returned False, connection failed
+        # Manager cleans up client on failed connection (cleaner state management)
+        assert app.gspro_client is None
+        # Verify status label was updated to show failure
+        # (status_label.text is set via the _on_gspro_connect callback)
 
     @pytest.mark.asyncio
     async def test_gspro_disconnect_handled_gracefully(
