@@ -10,6 +10,20 @@ import pytest
 from gc2_connect.models import GC2ShotData, GSProShotMessage
 
 
+@pytest.fixture(autouse=True)
+def reset_connection_managers():
+    """Reset connection manager singletons before each test.
+
+    This ensures test isolation - each test gets fresh singleton instances.
+    Without this, state from one test could leak into another.
+    """
+    from gc2_connect.services.connection_manager import reset_all
+
+    reset_all()
+    yield
+    reset_all()
+
+
 @pytest.fixture
 def valid_gc2_dict() -> dict[str, Any]:
     """Fixture providing valid GC2 shot data as a dictionary."""
