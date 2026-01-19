@@ -105,6 +105,7 @@ hiddenimports = [
     'gc2_connect.services.history',
     'gc2_connect.services.export',
     'gc2_connect.services.shot_router',
+    'gc2_connect.services.connection_manager',
     'gc2_connect.open_range',
     'gc2_connect.open_range.engine',
     'gc2_connect.open_range.models',
@@ -129,7 +130,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['build_hooks/hook-macos-dock.py'],
     excludes=[
         # Exclude test modules
         'pytest',
