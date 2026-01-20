@@ -23,6 +23,8 @@ from gc2_connect.services.connection_manager import (
     get_callback_registry,
     get_gc2_manager,
     get_gspro_manager,
+    get_shot_forwarder,
+    initialize_shot_forwarding,
     shutdown_all,
 )
 from gc2_connect.services.export import export_to_csv, generate_export_filename
@@ -32,10 +34,41 @@ from gc2_connect.ui.components.mode_selector import ModeSelector
 from gc2_connect.ui.components.open_range_view import OpenRangeView
 from gc2_connect.utils.reconnect import ReconnectionManager, ReconnectionState
 
-# Configure logging (set GC2_DEBUG=1 for verbose USB debugging)
-log_level = logging.DEBUG if os.environ.get("GC2_DEBUG") else logging.INFO
-logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+
+def _setup_logging() -> logging.Logger:
+    """Configure logging with console and file handlers."""
+    from logging.handlers import RotatingFileHandler
+
+    log_level = logging.DEBUG if os.environ.get("GC2_DEBUG") else logging.INFO
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+    # Console logging
+    logging.basicConfig(level=log_level, format=log_format)
+
+    # File logging (~/Library/Logs/GC2Connect/ on macOS, ~/.gc2connect/logs/ elsewhere)
+    import sys
+
+    if sys.platform == "darwin":
+        log_dir = Path.home() / "Library" / "Logs" / "GC2Connect"
+    else:
+        log_dir = Path.home() / ".gc2connect" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "gc2connect.log"
+
+    # Add rotating file handler (5MB max, keep 3 backups)
+    file_handler = RotatingFileHandler(
+        log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    file_handler.setFormatter(logging.Formatter(log_format))
+    file_handler.setLevel(logging.DEBUG)  # Always log DEBUG to file
+    logging.getLogger().addHandler(file_handler)
+
+    module_logger = logging.getLogger(__name__)
+    module_logger.info(f"Logging to file: {log_file}")
+    return module_logger
+
+
+logger = _setup_logging()
 
 
 class GC2ConnectApp:
@@ -50,6 +83,10 @@ class GC2ConnectApp:
         self._gc2_mgr = get_gc2_manager()
         self._gspro_mgr = get_gspro_manager()
         self._callback_registry = get_callback_registry()
+
+        # Shot forwarder (handles GC2 → GSPro routing independent of UI state)
+        initialize_shot_forwarding()
+        self._shot_forwarder = get_shot_forwarder()
 
         # State (initialized from settings)
         self.shot_history = ShotHistoryManager(limit=self.settings.ui.history_limit)
@@ -368,7 +405,7 @@ class GC2ConnectApp:
             ui.space()
             with ui.row().classes("items-center"):
                 ui.label("Auto-send:").classes("text-sm")
-                ui.switch(value=True, on_change=lambda e: setattr(self, "auto_send", e.value))
+                ui.switch(value=True, on_change=self._on_auto_send_change)
 
         # Main content area
         with ui.row().classes("w-full gap-4 p-4"):
@@ -510,6 +547,9 @@ class GC2ConnectApp:
             self.gspro_status_label.classes(
                 remove="text-red-500 text-yellow-500", add="text-green-500"
             )
+            # Enable shot forwarding if conditions are met
+            if self.shot_router.mode == AppMode.GSPRO and self.auto_send:
+                self._shot_forwarder.enable()
 
     def _build_gc2_panel(self) -> None:
         """Build the GC2 connection panel."""
@@ -856,6 +896,9 @@ class GC2ConnectApp:
             self.gspro_status_label.classes(
                 remove="text-red-500 text-yellow-500", add="text-green-500"
             )
+            # Enable shot forwarding if in GSPro mode with auto-send
+            if self.shot_router.mode == AppMode.GSPRO and self.auto_send:
+                self._shot_forwarder.enable()
             ui.notify("GSPro Connected!", type="positive")
         else:
             self.gspro_status_label.text = "Connection Failed"
@@ -869,6 +912,9 @@ class GC2ConnectApp:
             self._gspro_reconnect_task.cancel()
             self._gspro_reconnect_task = None
 
+        # Disable shot forwarding (no destination)
+        self._shot_forwarder.disable()
+
         # Disconnect via manager
         self._gspro_mgr.disconnect()
 
@@ -879,41 +925,39 @@ class GC2ConnectApp:
     def _on_shot_received(self, shot: GC2ShotData) -> None:
         """Handle a new shot from the GC2.
 
-        Note: This is called from the callback registry which automatically
-        handles dead callback cleanup if the client has been deleted.
+        Note: Shot forwarding to GSPro is handled at the connection manager
+        level (ShotForwarder) BEFORE this callback runs. This ensures shots
+        reach GSPro even if the UI is stale or disconnected.
+
+        This callback only handles:
+        - Adding to shot history
+        - Updating the UI display
+        - Open Range mode physics simulation
         """
-        logger.info(f"Shot received: #{shot.shot_id}")
+        logger.info(f"Shot received in UI: #{shot.shot_id}")
 
         try:
             # Always update history regardless of mode
             self._add_to_history(shot)
 
-            # Route shot based on current mode
+            # Handle UI updates and Open Range mode
             if self.auto_send:
-                # Create async task for shot routing
-                asyncio.create_task(self._route_shot(shot))
+                asyncio.create_task(self._handle_shot_ui(shot))
         except Exception as e:
-            logger.error(f"Error handling shot: {e}")
+            logger.error(f"Error handling shot in UI: {e}")
 
-    async def _route_shot(self, shot: GC2ShotData) -> None:
-        """Route shot to appropriate destination based on mode."""
+    async def _handle_shot_ui(self, shot: GC2ShotData) -> None:
+        """Handle UI updates for a shot (GSPro sending is done by forwarder)."""
         try:
             if self.shot_router.mode == AppMode.GSPRO:
                 # Update display for GSPro mode
+                # Note: Actual sending to GSPro is handled by ShotForwarder
                 self._update_shot_display(shot)
-
-                # Send to GSPro if connected (use manager)
-                if self._gspro_mgr.is_connected and self._gspro_mgr.client:
-                    self.shot_router.set_gspro_client(self._gspro_mgr.client)
-                    await self.shot_router.route_shot(shot)
-                    logger.info(f"Shot #{shot.shot_id} sent to GSPro")
-                else:
-                    logger.warning("GSPro not connected - shot not sent")
             else:
                 # Open Range mode - route to physics engine
                 await self.shot_router.route_shot(shot)
         except Exception as e:
-            logger.error(f"Error routing shot: {e}")
+            logger.error(f"Error handling shot UI: {e}")
 
     def _on_status_received(self, status: GC2BallStatus) -> None:
         """Handle ball status update from the GC2.
@@ -971,12 +1015,34 @@ class GC2ConnectApp:
         """Handle mode change from shot router (callback)."""
         logger.info(f"Mode changed to: {mode.value}")
 
+        # Update shot forwarding based on mode
+        if mode == AppMode.GSPRO and self.auto_send and self._gspro_mgr.is_connected:
+            self._shot_forwarder.enable()
+        else:
+            # Disable forwarding for Open Range mode (uses physics engine instead)
+            self._shot_forwarder.disable()
+
         # Update settings (doesn't require UI context)
         self.settings.mode = mode.value
         self.save_settings()
 
         # Note: UI visibility is handled in _handle_mode_selector_change
         # to ensure we have proper NiceGUI context
+
+    def _on_auto_send_change(self, e: Any) -> None:
+        """Handle auto-send toggle change."""
+        self.auto_send = e.value
+        logger.info(f"Auto-send changed to: {self.auto_send}")
+
+        # Update shot forwarding based on new auto_send state
+        if (
+            self.auto_send
+            and self.shot_router.mode == AppMode.GSPRO
+            and self._gspro_mgr.is_connected
+        ):
+            self._shot_forwarder.enable()
+        else:
+            self._shot_forwarder.disable()
 
     async def _on_open_range_result(self, result: ShotResult) -> None:
         """Handle shot result from Open Range simulation."""
