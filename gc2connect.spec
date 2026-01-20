@@ -194,6 +194,7 @@ app = BUNDLE(
         'NSHighResolutionCapable': True,
         'LSMinimumSystemVersion': '10.15',
         'NSRequiresAquaSystemAppearance': False,  # Support dark mode
+        'NSAppSleepDisabled': True,  # Disable App Nap to prevent background throttling
         'CFBundleDocumentTypes': [],
         'NSHumanReadableCopyright': 'Copyright © 2024-2025',
     },

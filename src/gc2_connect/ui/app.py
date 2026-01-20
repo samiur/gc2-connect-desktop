@@ -1141,6 +1141,7 @@ def main() -> None:
         native=True,  # Use native window instead of browser
         window_size=(1400, 900),
         fullscreen=False,
+        reconnect_timeout=60.0,  # Allow 60s for reconnection attempts
     )
 
 
