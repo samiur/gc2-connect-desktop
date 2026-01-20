@@ -12,6 +12,7 @@ from gc2_connect.models import GC2BallStatus, GC2ShotData
 from gc2_connect.services.connection_manager import (
     GC2ConnectionManager,
     GSProConnectionManager,
+    ShotForwarder,
     UICallbackRegistry,
     get_callback_registry,
     get_gc2_manager,
@@ -190,7 +191,8 @@ class TestGC2ConnectionManager:
     def test_connect_mock_mode(self) -> None:
         """Test connecting in mock mode."""
         registry = UICallbackRegistry()
-        manager = GC2ConnectionManager(registry)
+        forwarder = ShotForwarder()
+        manager = GC2ConnectionManager(registry, forwarder)
 
         assert not manager.is_connected
 
@@ -203,7 +205,8 @@ class TestGC2ConnectionManager:
     def test_disconnect(self) -> None:
         """Test disconnecting."""
         registry = UICallbackRegistry()
-        manager = GC2ConnectionManager(registry)
+        forwarder = ShotForwarder()
+        manager = GC2ConnectionManager(registry, forwarder)
 
         manager.connect(use_mock=True)
         assert manager.is_connected
@@ -214,7 +217,8 @@ class TestGC2ConnectionManager:
     def test_connect_notifies_callbacks(self) -> None:
         """Test that connect notifies callbacks."""
         registry = UICallbackRegistry()
-        manager = GC2ConnectionManager(registry)
+        forwarder = ShotForwarder()
+        manager = GC2ConnectionManager(registry, forwarder)
         connect_results: list[bool] = []
 
         registry.register_gc2_connect_callback(lambda s: connect_results.append(s), "token1")
@@ -226,7 +230,8 @@ class TestGC2ConnectionManager:
     def test_shot_routed_to_registry(self) -> None:
         """Test that shots from reader are routed to registry."""
         registry = UICallbackRegistry()
-        manager = GC2ConnectionManager(registry)
+        forwarder = ShotForwarder()
+        manager = GC2ConnectionManager(registry, forwarder)
         received_shots: list[GC2ShotData] = []
 
         registry.register_shot_callback(lambda s: received_shots.append(s), "token1")
@@ -243,7 +248,8 @@ class TestGC2ConnectionManager:
     def test_status_routed_to_registry(self) -> None:
         """Test that status from reader is routed to registry."""
         registry = UICallbackRegistry()
-        manager = GC2ConnectionManager(registry)
+        forwarder = ShotForwarder()
+        manager = GC2ConnectionManager(registry, forwarder)
         received_statuses: list[GC2BallStatus] = []
 
         registry.register_status_callback(lambda s: received_statuses.append(s), "token1")
@@ -262,7 +268,8 @@ class TestGC2ConnectionManager:
     def test_send_test_shot_mock_only(self) -> None:
         """Test that send_test_shot only works in mock mode."""
         registry = UICallbackRegistry()
-        manager = GC2ConnectionManager(registry)
+        forwarder = ShotForwarder()
+        manager = GC2ConnectionManager(registry, forwarder)
 
         # Not connected - should log warning
         manager.send_test_shot()
@@ -275,7 +282,8 @@ class TestGC2ConnectionManager:
     def test_last_shot_id_persists(self) -> None:
         """Test that last_shot_id persists across reconnects."""
         registry = UICallbackRegistry()
-        manager = GC2ConnectionManager(registry)
+        forwarder = ShotForwarder()
+        manager = GC2ConnectionManager(registry, forwarder)
 
         manager.connect(use_mock=True)
         manager._on_shot(GC2ShotData(shot_id=5, ball_speed=150.0))

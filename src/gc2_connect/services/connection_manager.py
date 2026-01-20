@@ -10,12 +10,14 @@ Key components:
 - UICallbackRegistry: Token-based callback registration for UI updates
 - GC2ConnectionManager: Singleton wrapper for GC2 USB reader
 - GSProConnectionManager: Singleton wrapper for GSPro TCP client
+- ShotForwarder: Routes shots from GC2 to GSPro independent of UI state
 
 Usage:
     from gc2_connect.services.connection_manager import (
         get_gc2_manager,
         get_gspro_manager,
         get_callback_registry,
+        get_shot_forwarder,
     )
 
     # In UI code
@@ -25,12 +27,17 @@ Usage:
     # Connect to devices
     gc2 = get_gc2_manager()
     gc2.connect(use_mock=True)
+
+    # Enable auto-forwarding to GSPro
+    forwarder = get_shot_forwarder()
+    forwarder.enable()
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -43,6 +50,47 @@ if TYPE_CHECKING:
     from gc2_connect.gc2.usb_reader import PacketSource
 
 logger = logging.getLogger(__name__)
+
+
+# App Nap prevention for macOS
+_app_nap_activity_token: Any = None
+
+
+def _prevent_app_nap(reason: str = "Processing GC2 shot data") -> None:
+    """Prevent macOS App Nap from throttling this process."""
+    global _app_nap_activity_token
+    if sys.platform != "darwin" or _app_nap_activity_token is not None:
+        return
+
+    try:
+        from Foundation import NSProcessInfo  # type: ignore[import-not-found]
+
+        # NSActivityUserInitiatedAllowingIdleSystemSleep = 0x00FFFFFF
+        # This prevents App Nap but allows system sleep
+        process_info = NSProcessInfo.processInfo()
+        _app_nap_activity_token = process_info.beginActivityWithOptions_reason_(0x00FFFFFF, reason)
+        logger.info(f"App Nap prevention enabled: {reason}")
+    except ImportError:
+        logger.debug("Foundation not available - App Nap prevention skipped")
+    except Exception as e:
+        logger.warning(f"Failed to prevent App Nap: {e}")
+
+
+def _allow_app_nap() -> None:
+    """Re-enable macOS App Nap for this process."""
+    global _app_nap_activity_token
+    if sys.platform != "darwin" or _app_nap_activity_token is None:
+        return
+
+    try:
+        from Foundation import NSProcessInfo
+
+        process_info = NSProcessInfo.processInfo()
+        process_info.endActivity_(_app_nap_activity_token)
+        _app_nap_activity_token = None
+        logger.info("App Nap prevention disabled")
+    except Exception as e:
+        logger.warning(f"Failed to re-enable App Nap: {e}")
 
 
 @dataclass
@@ -161,15 +209,84 @@ class UICallbackRegistry:
         return "client" in error_str and "deleted" in error_str
 
 
+class ShotForwarder:
+    """Routes shots from GC2 to GSPro independent of UI state.
+
+    This class handles shot forwarding at the connection manager level,
+    ensuring shots reach GSPro even if the UI is stale or disconnected.
+    This is critical for background operation where the UI may refresh
+    but shot delivery must continue uninterrupted.
+    """
+
+    def __init__(self) -> None:
+        self._enabled = False
+        self._gc2_mgr: GC2ConnectionManager | None = None
+        self._gspro_mgr: GSProConnectionManager | None = None
+
+    def set_managers(
+        self, gc2_mgr: GC2ConnectionManager, gspro_mgr: GSProConnectionManager
+    ) -> None:
+        """Set the connection managers for forwarding."""
+        self._gc2_mgr = gc2_mgr
+        self._gspro_mgr = gspro_mgr
+
+    def enable(self) -> None:
+        """Enable automatic shot forwarding to GSPro."""
+        self._enabled = True
+        logger.info("Shot forwarding enabled")
+
+    def disable(self) -> None:
+        """Disable automatic shot forwarding."""
+        self._enabled = False
+        logger.info("Shot forwarding disabled")
+
+    @property
+    def is_enabled(self) -> bool:
+        """Whether shot forwarding is currently enabled."""
+        return self._enabled
+
+    async def forward_shot(self, shot: GC2ShotData) -> bool:
+        """Forward a shot to GSPro if enabled and connected.
+
+        This is called from GC2ConnectionManager._on_shot() BEFORE
+        UI callbacks, ensuring shots reach GSPro regardless of UI state.
+
+        Args:
+            shot: The shot data to forward.
+
+        Returns:
+            True if the shot was forwarded, False otherwise.
+        """
+        if not self._enabled:
+            logger.debug(f"Shot #{shot.shot_id} not forwarded - forwarding disabled")
+            return False
+
+        if self._gspro_mgr is None or not self._gspro_mgr.is_connected:
+            logger.debug(f"Shot #{shot.shot_id} not forwarded - GSPro not connected")
+            return False
+
+        try:
+            response = await self._gspro_mgr.send_shot(shot)
+            logger.info(f"Shot #{shot.shot_id} forwarded to GSPro (response: {response})")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to forward shot #{shot.shot_id} to GSPro: {e}")
+            return False
+
+
 class GC2ConnectionManager:
     """Singleton manager for GC2 USB connection.
 
     Wraps GC2USBReader and persists connection state across page refreshes.
     The reader's callbacks are routed through the UICallbackRegistry.
+    Shot forwarding to GSPro happens at this level, independent of UI state.
     """
 
-    def __init__(self, callback_registry: UICallbackRegistry) -> None:
+    def __init__(
+        self, callback_registry: UICallbackRegistry, shot_forwarder: ShotForwarder
+    ) -> None:
         self._callback_registry = callback_registry
+        self._shot_forwarder = shot_forwarder
         self._reader: GC2USBReader | MockGC2Reader | None = None
         self._read_task: asyncio.Task[None] | None = None
         self._last_shot_id = 0
@@ -240,6 +357,8 @@ class GC2ConnectionManager:
         self._callback_registry.notify_gc2_connect(success)
 
         if success:
+            # Prevent App Nap while GC2 is connected (macOS only)
+            _prevent_app_nap("GC2 launch monitor connected - processing shot data")
             logger.info("GC2 connected via connection manager")
         else:
             logger.warning("GC2 connection failed")
@@ -269,6 +388,8 @@ class GC2ConnectionManager:
         if self._reader is not None:
             self._reader.disconnect()
             self._reader = None
+            # Allow App Nap again when disconnected (macOS only)
+            _allow_app_nap()
 
         logger.info("GC2 disconnected via connection manager")
 
@@ -280,8 +401,25 @@ class GC2ConnectionManager:
             logger.warning("send_test_shot only works in mock mode")
 
     def _on_shot(self, shot: GC2ShotData) -> None:
-        """Internal callback for shots from the reader."""
+        """Internal callback for shots from the reader.
+
+        Shot forwarding to GSPro happens HERE, at the connection manager level,
+        BEFORE UI callbacks. This ensures shots reach GSPro even if the UI
+        is stale or disconnected (e.g., after a page refresh in the background).
+        """
         self._last_shot_id = shot.shot_id
+
+        # Forward shot to GSPro FIRST (independent of UI state)
+        # This runs in a fire-and-forget task to not block the read loop
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._shot_forwarder.forward_shot(shot))
+        except RuntimeError:
+            # No running event loop (e.g., in synchronous tests)
+            # The forwarder won't run, but that's OK for tests
+            pass
+
+        # Then notify UI callbacks (may fail if UI is stale, but that's OK)
         self._callback_registry.notify_shot(shot)
 
     def _on_status(self, status: GC2BallStatus) -> None:
@@ -417,6 +555,7 @@ class GSProConnectionManager:
 
 # Module-level singletons
 _callback_registry: UICallbackRegistry | None = None
+_shot_forwarder: ShotForwarder | None = None
 _gc2_manager: GC2ConnectionManager | None = None
 _gspro_manager: GSProConnectionManager | None = None
 
@@ -429,11 +568,19 @@ def get_callback_registry() -> UICallbackRegistry:
     return _callback_registry
 
 
+def get_shot_forwarder() -> ShotForwarder:
+    """Get or create the shot forwarder singleton."""
+    global _shot_forwarder
+    if _shot_forwarder is None:
+        _shot_forwarder = ShotForwarder()
+    return _shot_forwarder
+
+
 def get_gc2_manager() -> GC2ConnectionManager:
     """Get or create the GC2 connection manager singleton."""
     global _gc2_manager
     if _gc2_manager is None:
-        _gc2_manager = GC2ConnectionManager(get_callback_registry())
+        _gc2_manager = GC2ConnectionManager(get_callback_registry(), get_shot_forwarder())
     return _gc2_manager
 
 
@@ -445,20 +592,34 @@ def get_gspro_manager() -> GSProConnectionManager:
     return _gspro_manager
 
 
+def initialize_shot_forwarding() -> None:
+    """Initialize shot forwarding between GC2 and GSPro managers.
+
+    This must be called after both managers are created to wire up
+    the shot forwarder with references to both managers.
+    """
+    forwarder = get_shot_forwarder()
+    forwarder.set_managers(get_gc2_manager(), get_gspro_manager())
+    logger.debug("Shot forwarding initialized")
+
+
 def reset_all() -> None:
     """Reset all singletons. For testing only.
 
     This disconnects any active connections and clears the singleton
     references, allowing fresh instances to be created.
     """
-    global _callback_registry, _gc2_manager, _gspro_manager
+    global _callback_registry, _shot_forwarder, _gc2_manager, _gspro_manager
 
     if _gc2_manager is not None:
         _gc2_manager.disconnect()
     if _gspro_manager is not None:
         _gspro_manager.disconnect()
+    if _shot_forwarder is not None:
+        _shot_forwarder.disable()
 
     _callback_registry = None
+    _shot_forwarder = None
     _gc2_manager = None
     _gspro_manager = None
 
