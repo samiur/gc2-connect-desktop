@@ -188,8 +188,8 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': 'GC2 Connect',
         'CFBundleDisplayName': 'GC2 Connect',
-        'CFBundleVersion': '1.1.1',
-        'CFBundleShortVersionString': '1.1.1',
+        'CFBundleVersion': '1.1.2',
+        'CFBundleShortVersionString': '1.1.2',
         'CFBundleIdentifier': 'com.gc2connect.app',
         'NSHighResolutionCapable': True,
         'LSMinimumSystemVersion': '10.15',
