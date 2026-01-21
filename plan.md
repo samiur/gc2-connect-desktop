@@ -51,6 +51,9 @@ Integration tests, shot history improvements, CSV export.
 ### Phase 5: Open Range Feature (NEW)
 Implement built-in driving range with physics simulation and 3D visualization.
 
+### Phase 5b: OpenGolfCoach Integration (NEW)
+Replace custom physics calculations with OpenGolfCoach library for improved accuracy and derived shot values (shot classification, smash factor, club data estimation).
+
 ### Phase 6: Polish & Packaging
 Final testing, documentation, and packaging for distribution.
 
@@ -2227,6 +2230,642 @@ REQUIREMENTS:
 
 ---
 
+# PHASE 5b: OPENGOLFCOACH INTEGRATION
+
+Replace custom physics calculations with the OpenGolfCoach library for improved accuracy and additional derived values.
+
+## Prompt 21c: Add OpenGolfCoach Dependency
+
+```text
+Add the OpenGolfCoach library as a dependency and create a wrapper module for it.
+
+CONTEXT:
+- OpenGolfCoach is a Rust/WebAssembly library with Python bindings (via PyO3/maturin)
+- PyPI package: opengolfcoach (https://pypi.org/project/opengolfcoach/)
+- GitHub: https://github.com/OpenLaunchLabs/open-golf-coach
+- It provides `calculate_derived_values(json_input: str) -> str` function
+- Returns carry/total distance, spin components, shot classification, and more
+
+TASK:
+
+1. Add OpenGolfCoach to project dependencies:
+   - Run: uv add opengolfcoach
+   - Verify installation: uv run python -c "import opengolfcoach"
+
+2. Create src/gc2_connect/open_range/physics/opengolfcoach_wrapper.py:
+```python
+"""
+ABOUTME: Wrapper module for OpenGolfCoach library integration.
+ABOUTME: Provides Python-friendly interface to the Rust/WASM physics calculations.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import opengolfcoach
+
+if TYPE_CHECKING:
+    from gc2_connect.models import GC2ShotData
+
+
+@dataclass
+class OpenGolfCoachInput:
+    """Input parameters for OpenGolfCoach calculation."""
+    ball_speed_meters_per_second: float
+    vertical_launch_angle_degrees: float
+    horizontal_launch_angle_degrees: float = 0.0
+    total_spin_rpm: float = 0.0
+    spin_axis_degrees: float = 0.0
+
+    def to_json(self) -> str:
+        """Convert to JSON string for OpenGolfCoach."""
+        return json.dumps({
+            "ball_speed_meters_per_second": self.ball_speed_meters_per_second,
+            "vertical_launch_angle_degrees": self.vertical_launch_angle_degrees,
+            "horizontal_launch_angle_degrees": self.horizontal_launch_angle_degrees,
+            "total_spin_rpm": self.total_spin_rpm,
+            "spin_axis_degrees": self.spin_axis_degrees,
+        })
+
+    @classmethod
+    def from_gc2_shot(cls, shot: "GC2ShotData") -> "OpenGolfCoachInput":
+        """Create input from GC2ShotData."""
+        # Convert mph to m/s (1 mph = 0.44704 m/s)
+        ball_speed_ms = shot.ball_speed * 0.44704
+        # Calculate total spin from back_spin and side_spin
+        import math
+        total_spin = math.sqrt(shot.back_spin ** 2 + shot.side_spin ** 2)
+        # Calculate spin axis from components
+        spin_axis = shot.spin_axis  # Use property if available
+        return cls(
+            ball_speed_meters_per_second=ball_speed_ms,
+            vertical_launch_angle_degrees=shot.launch_angle,
+            horizontal_launch_angle_degrees=shot.horizontal_launch_angle,
+            total_spin_rpm=total_spin,
+            spin_axis_degrees=spin_axis,
+        )
+
+
+@dataclass
+class OpenGolfCoachResult:
+    """Output from OpenGolfCoach calculation."""
+    # Distance metrics (in meters from library)
+    carry_distance_meters: float
+    total_distance_meters: float
+    offline_distance_meters: float
+
+    # Spin components
+    backspin_rpm: float
+    sidespin_rpm: float
+
+    # Performance metrics
+    club_speed_meters_per_second: float | None
+    smash_factor: float | None
+    club_path_degrees: float | None
+    club_face_to_target_degrees: float | None
+    club_face_to_path_degrees: float | None
+
+    # Shot classification
+    shot_name: str
+    shot_rank: str
+    shot_color_rgb: str
+
+    # Convenience properties
+    @property
+    def carry_distance_yards(self) -> float:
+        """Carry distance converted to yards."""
+        return self.carry_distance_meters * 1.09361
+
+    @property
+    def total_distance_yards(self) -> float:
+        """Total distance converted to yards."""
+        return self.total_distance_meters * 1.09361
+
+    @property
+    def offline_distance_yards(self) -> float:
+        """Offline distance converted to yards."""
+        return self.offline_distance_meters * 1.09361
+
+
+def calculate_shot(input_data: OpenGolfCoachInput) -> OpenGolfCoachResult:
+    """Calculate derived values using OpenGolfCoach library.
+
+    Args:
+        input_data: Shot input parameters.
+
+    Returns:
+        OpenGolfCoachResult with calculated values.
+
+    Raises:
+        ValueError: If calculation fails or returns invalid data.
+    """
+    json_input = input_data.to_json()
+    json_output = opengolfcoach.calculate_derived_values(json_input)
+    result = json.loads(json_output)
+
+    return OpenGolfCoachResult(
+        carry_distance_meters=result.get("carry_distance_meters", 0.0),
+        total_distance_meters=result.get("total_distance_meters", 0.0),
+        offline_distance_meters=result.get("offline_distance_meters", 0.0),
+        backspin_rpm=result.get("backspin_rpm", 0.0),
+        sidespin_rpm=result.get("sidespin_rpm", 0.0),
+        club_speed_meters_per_second=result.get("club_speed_meters_per_second"),
+        smash_factor=result.get("smash_factor"),
+        club_path_degrees=result.get("club_path_degrees"),
+        club_face_to_target_degrees=result.get("club_face_to_target_degrees"),
+        club_face_to_path_degrees=result.get("club_face_to_path_degrees"),
+        shot_name=result.get("shot_name", "Unknown"),
+        shot_rank=result.get("shot_rank", "D"),
+        shot_color_rgb=result.get("shot_color_rgb", "#808080"),
+    )
+
+
+def calculate_shot_from_gc2(shot: "GC2ShotData") -> OpenGolfCoachResult:
+    """Calculate derived values directly from GC2ShotData.
+
+    Args:
+        shot: GC2 shot data from launch monitor.
+
+    Returns:
+        OpenGolfCoachResult with calculated values.
+    """
+    input_data = OpenGolfCoachInput.from_gc2_shot(shot)
+    return calculate_shot(input_data)
+```
+
+3. Write tests in tests/unit/test_opengolfcoach_wrapper.py:
+   - Test OpenGolfCoachInput.to_json() produces valid JSON
+   - Test OpenGolfCoachInput.from_gc2_shot() converts units correctly
+   - Test calculate_shot() returns valid result for typical shot
+   - Test OpenGolfCoachResult property conversions (meters to yards)
+   - Test error handling for invalid input
+
+4. Verify the integration:
+   - Run: uv run pytest tests/unit/test_opengolfcoach_wrapper.py -v
+
+REQUIREMENTS:
+- All code files must have ABOUTME comments
+- Handle library import errors gracefully (fallback to custom physics)
+- Unit conversions must be accurate (mph <-> m/s, meters <-> yards)
+- Run tests: uv run pytest tests/unit/test_opengolfcoach_wrapper.py -v
+```
+
+---
+
+## Prompt 21d: Integrate OpenGolfCoach into ShotSummary
+
+```text
+Extend ShotSummary and ShotResult models to include OpenGolfCoach derived values.
+
+CONTEXT:
+- OpenGolfCoach provides additional values not in our current models:
+  - Shot classification (shot_name: "Straight", "Push Slice", etc.)
+  - Shot ranking (shot_rank: S+, S, A, B, C, D, E)
+  - Shot color for UI (shot_color_rgb: hex color)
+  - Smash factor
+  - Estimated club data
+- These should be optional to maintain backwards compatibility
+- The existing physics engine can still be used for trajectory (flight path)
+- OpenGolfCoach provides carry/total distance which we can compare to our physics
+
+TASK:
+
+1. First, write tests in tests/unit/test_open_range/test_extended_models.py:
+   - Test ShotSummary with new optional fields
+   - Test ShotSummary without new fields (backwards compatible)
+   - Test DerivedShotData model creation
+   - Test ShotResult includes derived data when available
+
+2. Update src/gc2_connect/open_range/models.py:
+```python
+# Add new model for OpenGolfCoach derived values
+class DerivedShotData(BaseModel):
+    """Shot data derived from OpenGolfCoach calculations."""
+
+    # Shot classification
+    shot_name: Annotated[str, Field(description="Human-readable shot classification")] = "Unknown"
+    shot_rank: Annotated[str, Field(description="Shot quality rank (S+, S, A, B, C, D, E)")] = "D"
+    shot_color_rgb: Annotated[str, Field(description="Hex color for UI display")] = "#808080"
+
+    # Performance metrics
+    smash_factor: Annotated[float | None, Field(description="Ball speed / club speed ratio")] = None
+
+    # Estimated club data (from ball data)
+    estimated_club_speed_mph: Annotated[float | None, Field(description="Estimated club speed")] = None
+    estimated_club_path_deg: Annotated[float | None, Field(description="Estimated club path")] = None
+    estimated_face_angle_deg: Annotated[float | None, Field(description="Estimated face angle")] = None
+
+    # OpenGolfCoach distance calculations (for comparison)
+    ogc_carry_distance: Annotated[float | None, Field(description="Carry distance from OpenGolfCoach")] = None
+    ogc_total_distance: Annotated[float | None, Field(description="Total distance from OpenGolfCoach")] = None
+
+
+# Update ShotResult to include derived data
+class ShotResult(BaseModel):
+    """Complete simulation result."""
+
+    trajectory: Annotated[list[TrajectoryPoint], Field(description="List of trajectory points")]
+    summary: Annotated[ShotSummary, Field(description="Shot summary metrics")]
+    launch_data: Annotated[LaunchData, Field(description="Input launch conditions")]
+    conditions: Annotated[Conditions, Field(description="Environmental conditions")]
+    derived: Annotated[DerivedShotData | None, Field(description="OpenGolfCoach derived values")] = None
+```
+
+3. Create factory function to populate derived data:
+```python
+# In opengolfcoach_wrapper.py or a new enrichment module
+def enrich_shot_result(result: ShotResult, gc2_shot: GC2ShotData) -> ShotResult:
+    """Add OpenGolfCoach derived values to a ShotResult.
+
+    Args:
+        result: Existing ShotResult from physics engine.
+        gc2_shot: Original GC2 shot data.
+
+    Returns:
+        ShotResult with derived field populated.
+    """
+    try:
+        ogc_result = calculate_shot_from_gc2(gc2_shot)
+        derived = DerivedShotData(
+            shot_name=ogc_result.shot_name,
+            shot_rank=ogc_result.shot_rank,
+            shot_color_rgb=ogc_result.shot_color_rgb,
+            smash_factor=ogc_result.smash_factor,
+            estimated_club_speed_mph=ogc_result.club_speed_meters_per_second * 2.23694 if ogc_result.club_speed_meters_per_second else None,
+            estimated_club_path_deg=ogc_result.club_path_degrees,
+            estimated_face_angle_deg=ogc_result.club_face_to_target_degrees,
+            ogc_carry_distance=ogc_result.carry_distance_yards,
+            ogc_total_distance=ogc_result.total_distance_yards,
+        )
+        return result.model_copy(update={"derived": derived})
+    except Exception:
+        # If OpenGolfCoach fails, return original result without derived data
+        return result
+```
+
+4. Run tests: uv run pytest tests/unit/test_open_range/test_extended_models.py -v
+
+REQUIREMENTS:
+- Backwards compatible - existing code works without derived data
+- Graceful fallback if OpenGolfCoach fails
+- Use Annotated[Type, Field(...)] for new Pydantic fields
+```
+
+---
+
+## Prompt 21e: Update OpenRangeEngine to Use OpenGolfCoach
+
+```text
+Modify OpenRangeEngine to enrich shot results with OpenGolfCoach derived values.
+
+CONTEXT:
+- OpenRangeEngine.simulate_shot() currently only uses our physics engine
+- We want to add OpenGolfCoach derived values to the result
+- The physics engine trajectory is still used (OpenGolfCoach doesn't provide trajectory)
+- OpenGolfCoach gives us shot classification and other useful metrics
+
+TASK:
+
+1. First, write tests in tests/unit/test_open_range/test_engine_integration.py:
+   - Test simulate_shot() returns result with derived data
+   - Test simulate_shot() works when OpenGolfCoach import fails (graceful fallback)
+   - Test simulate_manual() also includes derived data
+   - Test derived.shot_name is populated
+   - Test derived.shot_rank is populated
+
+2. Update src/gc2_connect/open_range/engine.py:
+```python
+# Add import at top (with fallback)
+try:
+    from gc2_connect.open_range.physics.opengolfcoach_wrapper import (
+        calculate_shot,
+        OpenGolfCoachInput,
+    )
+    OPENGOLFCOACH_AVAILABLE = True
+except ImportError:
+    OPENGOLFCOACH_AVAILABLE = False
+
+
+class OpenRangeEngine:
+    # ... existing code ...
+
+    def simulate_shot(self, shot: GC2ShotData) -> ShotResult:
+        """Simulate a shot from GC2 data.
+
+        Args:
+            shot: GC2ShotData from launch monitor.
+
+        Returns:
+            ShotResult with trajectory, summary, and OpenGolfCoach derived values.
+        """
+        # Run physics simulation for trajectory
+        result = self.physics.simulate(
+            ball_speed_mph=shot.ball_speed,
+            vla_deg=shot.launch_angle,
+            hla_deg=shot.horizontal_launch_angle,
+            backspin_rpm=shot.back_spin,
+            sidespin_rpm=shot.side_spin,
+        )
+
+        # Enrich with OpenGolfCoach data if available
+        if OPENGOLFCOACH_AVAILABLE:
+            result = self._enrich_with_opengolfcoach(result, shot)
+
+        return result
+
+    def _enrich_with_opengolfcoach(
+        self, result: ShotResult, shot: GC2ShotData
+    ) -> ShotResult:
+        """Add OpenGolfCoach derived values to result.
+
+        Args:
+            result: Physics engine result.
+            shot: Original GC2 shot data.
+
+        Returns:
+            Enriched ShotResult with derived field.
+        """
+        try:
+            import math
+
+            # Create OpenGolfCoach input
+            ball_speed_ms = shot.ball_speed * 0.44704
+            total_spin = math.sqrt(shot.back_spin ** 2 + shot.side_spin ** 2)
+
+            input_data = OpenGolfCoachInput(
+                ball_speed_meters_per_second=ball_speed_ms,
+                vertical_launch_angle_degrees=shot.launch_angle,
+                horizontal_launch_angle_degrees=shot.horizontal_launch_angle,
+                total_spin_rpm=total_spin,
+                spin_axis_degrees=shot.spin_axis,
+            )
+
+            ogc_result = calculate_shot(input_data)
+
+            # Create derived data
+            from gc2_connect.open_range.models import DerivedShotData
+
+            derived = DerivedShotData(
+                shot_name=ogc_result.shot_name,
+                shot_rank=ogc_result.shot_rank,
+                shot_color_rgb=ogc_result.shot_color_rgb,
+                smash_factor=ogc_result.smash_factor,
+                estimated_club_speed_mph=(
+                    ogc_result.club_speed_meters_per_second * 2.23694
+                    if ogc_result.club_speed_meters_per_second
+                    else None
+                ),
+                estimated_club_path_deg=ogc_result.club_path_degrees,
+                estimated_face_angle_deg=ogc_result.club_face_to_target_degrees,
+                ogc_carry_distance=ogc_result.carry_distance_yards,
+                ogc_total_distance=ogc_result.total_distance_yards,
+            )
+
+            return result.model_copy(update={"derived": derived})
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"OpenGolfCoach enrichment failed: {e}")
+            return result
+```
+
+3. Run tests: uv run pytest tests/unit/test_open_range/test_engine_integration.py -v
+
+REQUIREMENTS:
+- Graceful fallback if OpenGolfCoach not available or fails
+- No breaking changes to existing API
+- Trajectory still comes from our physics engine
+- OpenGolfCoach provides classification and derived metrics
+```
+
+---
+
+## Prompt 21f: Update Open Range UI for Shot Classification
+
+```text
+Update the Open Range UI to display shot classification and ranking from OpenGolfCoach.
+
+CONTEXT:
+- ShotResult now includes DerivedShotData with shot_name, shot_rank, shot_color_rgb
+- UI should display these values prominently
+- Shot rank can use color coding (S+ = gold, S = silver, A = green, etc.)
+- The shot classification helps users understand their shot shape
+
+TASK:
+
+1. First, write tests in tests/integration/test_open_range_classification_ui.py:
+   - Test shot name displays in UI
+   - Test shot rank displays with correct color
+   - Test UI handles missing derived data gracefully
+   - Test shot color is applied to UI elements
+
+2. Update src/gc2_connect/ui/components/open_range_view.py:
+```python
+# Add shot classification display
+def _build_shot_classification_panel(self):
+    """Shot classification from OpenGolfCoach."""
+    with ui.card().classes('w-full'):
+        ui.label('Shot Analysis').classes('text-sm text-gray-400')
+        with ui.column().classes('gap-1'):
+            with ui.row().classes('items-center gap-2'):
+                ui.label('Type:').classes('text-gray-400')
+                self.shot_name_label = ui.label('--').classes('text-lg font-semibold')
+            with ui.row().classes('items-center gap-2'):
+                ui.label('Rating:').classes('text-gray-400')
+                self.shot_rank_badge = ui.badge('--').classes('text-lg')
+
+def _update_shot_classification(self, result: ShotResult):
+    """Update shot classification display."""
+    if result.derived:
+        self.shot_name_label.text = result.derived.shot_name
+        self.shot_rank_badge.text = result.derived.shot_rank
+
+        # Color the badge based on rank
+        rank_colors = {
+            'S+': 'bg-amber-400 text-black',
+            'S': 'bg-gray-300 text-black',
+            'A': 'bg-green-500 text-white',
+            'B': 'bg-blue-500 text-white',
+            'C': 'bg-purple-500 text-white',
+            'D': 'bg-orange-500 text-white',
+            'E': 'bg-red-500 text-white',
+        }
+        color_class = rank_colors.get(result.derived.shot_rank, 'bg-gray-500 text-white')
+        self.shot_rank_badge.classes(replace=f'{color_class} px-3 py-1 rounded')
+
+        # Optional: Apply shot color to trajectory or other elements
+        if result.derived.shot_color_rgb:
+            # Could use this for trajectory line color
+            pass
+    else:
+        self.shot_name_label.text = '--'
+        self.shot_rank_badge.text = '--'
+        self.shot_rank_badge.classes(replace='bg-gray-500 text-white px-3 py-1 rounded')
+```
+
+3. Add classification panel to build() method:
+   - Add after shot data panel
+   - Call _update_shot_classification in _update_data_display
+
+4. Optionally show smash factor and estimated club speed:
+   - Add a collapsible "Advanced" section
+   - Show estimated club speed, smash factor
+   - Show OGC vs physics engine distance comparison (for debugging)
+
+5. Run tests: uv run pytest tests/integration/test_open_range_classification_ui.py -v
+
+REQUIREMENTS:
+- UI gracefully handles missing derived data
+- Rank colors are visually distinct and intuitive
+- Shot name is prominent and easy to read
+- No UI errors when OpenGolfCoach is unavailable
+```
+
+---
+
+## Prompt 21g: Validate OpenGolfCoach Distances vs Physics Engine
+
+```text
+Create validation tests comparing OpenGolfCoach distances with our physics engine.
+
+CONTEXT:
+- Both OpenGolfCoach and our physics engine calculate carry/total distance
+- They should produce reasonably similar results for the same input
+- Any significant differences should be logged for investigation
+- This helps ensure both implementations are working correctly
+
+TASK:
+
+1. Write tests in tests/unit/test_open_range/test_physics_comparison.py:
+```python
+"""
+ABOUTME: Comparison tests between OpenGolfCoach and custom physics engine.
+ABOUTME: Validates that both implementations produce similar results.
+"""
+
+import pytest
+from gc2_connect.open_range.engine import OpenRangeEngine
+from gc2_connect.open_range.physics.opengolfcoach_wrapper import (
+    calculate_shot,
+    OpenGolfCoachInput,
+    OPENGOLFCOACH_AVAILABLE,
+)
+
+
+# Skip all tests if OpenGolfCoach not available
+pytestmark = pytest.mark.skipif(
+    not OPENGOLFCOACH_AVAILABLE,
+    reason="OpenGolfCoach not installed"
+)
+
+
+@pytest.fixture
+def engine():
+    return OpenRangeEngine()
+
+
+class TestPhysicsComparison:
+    """Compare OpenGolfCoach vs custom physics engine results."""
+
+    @pytest.mark.parametrize("ball_speed,vla,backspin,expected_carry_range", [
+        # Driver shot
+        (167.0, 10.9, 2686.0, (250, 300)),
+        # 7-iron shot
+        (120.0, 16.3, 7097.0, (150, 190)),
+        # Wedge shot
+        (102.0, 24.2, 9304.0, (115, 155)),
+    ])
+    def test_carry_distance_comparison(
+        self, engine, ball_speed, vla, backspin, expected_carry_range
+    ):
+        """Both engines should produce carry within expected range."""
+        # Run our physics engine
+        result = engine.simulate_manual(
+            ball_speed_mph=ball_speed,
+            vla_deg=vla,
+            hla_deg=0.0,
+            backspin_rpm=backspin,
+            sidespin_rpm=0.0,
+        )
+        physics_carry = result.summary.carry_distance
+
+        # Run OpenGolfCoach
+        import math
+        ogc_input = OpenGolfCoachInput(
+            ball_speed_meters_per_second=ball_speed * 0.44704,
+            vertical_launch_angle_degrees=vla,
+            horizontal_launch_angle_degrees=0.0,
+            total_spin_rpm=backspin,  # Assuming pure backspin
+            spin_axis_degrees=0.0,
+        )
+        ogc_result = calculate_shot(ogc_input)
+        ogc_carry = ogc_result.carry_distance_yards
+
+        # Both should be within expected range
+        min_carry, max_carry = expected_carry_range
+        assert min_carry <= physics_carry <= max_carry, (
+            f"Physics carry {physics_carry:.1f} outside expected {expected_carry_range}"
+        )
+        assert min_carry <= ogc_carry <= max_carry, (
+            f"OGC carry {ogc_carry:.1f} outside expected {expected_carry_range}"
+        )
+
+        # Results should be within 15% of each other
+        diff_pct = abs(physics_carry - ogc_carry) / max(physics_carry, ogc_carry) * 100
+        assert diff_pct < 15, (
+            f"Physics ({physics_carry:.1f}) vs OGC ({ogc_carry:.1f}) "
+            f"differ by {diff_pct:.1f}%"
+        )
+
+    def test_shot_classification_populated(self, engine):
+        """Verify shot classification is included in results."""
+        result = engine.simulate_manual(
+            ball_speed_mph=150.0,
+            vla_deg=12.0,
+            hla_deg=0.0,
+            backspin_rpm=3000.0,
+            sidespin_rpm=0.0,
+        )
+
+        assert result.derived is not None
+        assert result.derived.shot_name != "Unknown"
+        assert result.derived.shot_rank in ["S+", "S", "A", "B", "C", "D", "E"]
+        assert result.derived.shot_color_rgb.startswith("#")
+```
+
+2. Create a logging comparison utility:
+```python
+# In engine.py, add optional comparison logging
+def _log_distance_comparison(self, result: ShotResult) -> None:
+    """Log comparison between physics engine and OGC distances."""
+    if result.derived and result.derived.ogc_carry_distance:
+        physics = result.summary.carry_distance
+        ogc = result.derived.ogc_carry_distance
+        diff = physics - ogc
+        diff_pct = abs(diff) / max(physics, ogc) * 100 if max(physics, ogc) > 0 else 0
+
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(
+            f"Distance comparison - Physics: {physics:.1f}yd, "
+            f"OGC: {ogc:.1f}yd, Diff: {diff:+.1f}yd ({diff_pct:.1f}%)"
+        )
+```
+
+3. Run tests: uv run pytest tests/unit/test_open_range/test_physics_comparison.py -v
+
+REQUIREMENTS:
+- Tests are skipped gracefully if OpenGolfCoach not installed
+- Distance differences logged for debugging
+- Both engines should be within reasonable tolerance (15%)
+- Shot classification must be populated when OGC available
+```
+
+---
+
 # PHASE 6: POLISH & PACKAGING
 
 ## Prompt 22: End-to-End Tests
@@ -2409,21 +3048,28 @@ REQUIREMENTS:
 11. **Prompt 11**: CSV export ✅
 
 ## Phase 5: Open Range Feature
-12. **Prompt 12**: Open Range data models & constants
-13. **Prompt 13**: Aerodynamics module
-14. **Prompt 14**: Trajectory simulation (RK4)
-15. **Prompt 15**: Ground physics (bounce/roll)
-16. **Prompt 16**: Physics engine integration
-17. **Prompt 17**: Mode selection & shot router
-18. **Prompt 18**: Open Range settings
-19. **Prompt 19**: 3D driving range visualization
-20. **Prompt 20**: Open Range UI panel
-21. **Prompt 21**: Open Range integration
-21b. **Prompt 21b**: Ball trajectory tracing
+12. **Prompt 12**: Open Range data models & constants ✅
+13. **Prompt 13**: Aerodynamics module ✅
+14. **Prompt 14**: Trajectory simulation (RK4) ✅
+15. **Prompt 15**: Ground physics (bounce/roll) ✅
+16. **Prompt 16**: Physics engine integration ✅
+17. **Prompt 17**: Mode selection & shot router ✅
+18. **Prompt 18**: Open Range settings ✅
+19. **Prompt 19**: 3D driving range visualization ✅
+20. **Prompt 20**: Open Range UI panel ✅
+21. **Prompt 21**: Open Range integration ✅
+21b. **Prompt 21b**: Ball trajectory tracing ✅
+
+## Phase 5b: OpenGolfCoach Integration (NEW)
+21c. **Prompt 21c**: Add OpenGolfCoach dependency ← NEXT
+21d. **Prompt 21d**: Integrate OpenGolfCoach into ShotSummary
+21e. **Prompt 21e**: Update OpenRangeEngine to use OpenGolfCoach
+21f. **Prompt 21f**: Update Open Range UI for shot classification
+21g. **Prompt 21g**: Validate OpenGolfCoach distances vs physics engine
 
 ## Phase 6: Polish & Release
-22. **Prompt 22**: End-to-end tests
-23. **Prompt 23**: Type checking cleanup
-24. **Prompt 24**: Documentation & release
+22. **Prompt 22**: End-to-end tests ✅
+23. **Prompt 23**: Type checking cleanup ✅
+24. **Prompt 24**: Documentation & release ✅
 
 Each prompt builds on previous work. No orphaned code - everything is integrated.

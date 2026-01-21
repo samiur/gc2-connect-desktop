@@ -207,6 +207,46 @@ Target Release: v1.1.0 (with Open Range)
 
 ---
 
+## Phase 5b: OpenGolfCoach Integration (NEW)
+
+Replace custom shot calculations with OpenGolfCoach library for improved accuracy and additional derived values.
+
+- [ ] **Prompt 21c**: Add OpenGolfCoach Dependency ← NEXT
+  - [ ] Add opengolfcoach package via uv add
+  - [ ] Create opengolfcoach_wrapper.py with OpenGolfCoachInput/Result dataclasses
+  - [ ] Implement calculate_shot() function
+  - [ ] Implement calculate_shot_from_gc2() convenience function
+  - [ ] Write tests in tests/unit/test_opengolfcoach_wrapper.py
+  - [ ] Handle import errors gracefully (fallback to custom physics)
+
+- [ ] **Prompt 21d**: Integrate OpenGolfCoach into ShotSummary
+  - [ ] Write tests for extended models
+  - [ ] Create DerivedShotData model (shot_name, shot_rank, shot_color_rgb, etc.)
+  - [ ] Update ShotResult to include optional derived field
+  - [ ] Ensure backwards compatibility (derived is optional)
+
+- [ ] **Prompt 21e**: Update OpenRangeEngine to Use OpenGolfCoach
+  - [ ] Write tests for engine integration
+  - [ ] Update simulate_shot() to enrich results with OpenGolfCoach data
+  - [ ] Add _enrich_with_opengolfcoach() method
+  - [ ] Graceful fallback if OpenGolfCoach unavailable
+  - [ ] Keep trajectory from custom physics engine (OGC doesn't provide trajectory)
+
+- [ ] **Prompt 21f**: Update Open Range UI for Shot Classification
+  - [ ] Write integration tests for classification UI
+  - [ ] Add shot classification panel (shot_name, shot_rank)
+  - [ ] Add rank badge with color coding (S+=gold, S=silver, A=green, etc.)
+  - [ ] Update _update_data_display() to show classification
+  - [ ] Handle missing derived data gracefully
+
+- [ ] **Prompt 21g**: Validate OpenGolfCoach vs Physics Engine
+  - [ ] Write comparison tests (driver, 7-iron, wedge shots)
+  - [ ] Verify both engines within 15% tolerance
+  - [ ] Add distance comparison logging
+  - [ ] Skip tests gracefully if OpenGolfCoach not installed
+
+---
+
 ## Phase 6: Polish & Release
 
 - [x] **Prompt 22**: End-to-End Tests
@@ -267,6 +307,7 @@ uv run python tools/mock_gspro_server.py
 
 ### Decisions Made
 
+- **OpenGolfCoach Integration (2026-01-21)**: Replacing custom shot calculations with the OpenGolfCoach library (https://pypi.org/project/opengolfcoach/). Key benefits: (1) Shot classification (shot_name: "Straight", "Push Slice", etc.), (2) Shot quality ranking (S+, S, A, B, C, D, E), (3) Smash factor calculation, (4) Estimated club data from ball data, (5) Distance calculations validated against industry standards. The custom physics engine is KEPT for trajectory visualization (OpenGolfCoach doesn't provide trajectory points, only final distances). OpenGolfCoach enriches ShotResult with a `derived` field containing classification and metrics. Graceful fallback if library unavailable.
 - **GSPro Response Reader and Heartbeat Timer (2026-01-15)**: After analyzing the OpenSkyPlus2 C# client (docs/GsProApi.cs), identified key missing features: (1) Background reader loop to receive unsolicited GSPro messages (codes 201, 202, 203), (2) Match state tracking based on code 202/203 responses, (3) Periodic heartbeat timer (6 second intervals) that only runs during active matches, (4) Combined ready state logic (hardware_ready AND match_started). These changes will make our client behave more like the reference implementation and improve GSPro compatibility.
 - **GSPro Clean Disconnect (2026-01-14)**: Following OpenSkyPlus2 reference implementation. GSPro doesn't have a documented clean disconnect protocol, but the recommended approach is: (1) send heartbeat with LaunchMonitorIsReady=false, (2) flush socket, (3) wait 250ms, (4) close socket. This tells GSPro the launch monitor is going offline gracefully instead of just disappearing. See docs/GSPRO_DISCONNECT.md for details.
 - **0M Message Handling (2026-01-02)**: Added parsing of 0M messages for ball status. FLAGS=7 means ready (green light), BALLS>0 means ball detected. Status sent to GSPro via `LaunchMonitorIsReady` and `LaunchMonitorBallDetected` flags.
