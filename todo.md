@@ -48,14 +48,14 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Update ShotResult to include optional derived field
   - [x] Ensure backwards compatibility (derived is optional)
 
-- [ ] **Prompt 21e**: Update OpenRangeEngine to Use OpenGolfCoach ← NEXT
-  - [ ] Write tests for engine integration
-  - [ ] Update simulate_shot() to enrich results with OpenGolfCoach data
-  - [ ] Add _enrich_with_opengolfcoach() method
-  - [ ] Graceful fallback if OpenGolfCoach unavailable
-  - [ ] Keep trajectory from custom physics engine (OGC doesn't provide trajectory)
+- [x] **Prompt 21e**: Update OpenRangeEngine to Use OpenGolfCoach
+  - [x] Write tests for engine integration
+  - [x] Update simulate_shot() to enrich results with OpenGolfCoach data
+  - [x] Add _enrich_with_opengolfcoach() method
+  - [x] Graceful fallback if OpenGolfCoach unavailable
+  - [x] Keep trajectory from custom physics engine (OGC doesn't provide trajectory)
 
-- [ ] **Prompt 21f**: Update Open Range UI for Shot Classification
+- [ ] **Prompt 21f**: Update Open Range UI for Shot Classification ← NEXT
   - [ ] Write integration tests for classification UI
   - [ ] Add shot classification panel (shot_name, shot_rank)
   - [ ] Add rank badge with color coding (S+=gold, S=silver, A=green, etc.)

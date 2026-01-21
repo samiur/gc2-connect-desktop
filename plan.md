@@ -55,6 +55,8 @@ GC2 Connect Desktop is a Python application that reads shot data from a Foresigh
 - **Prompt 21**: Open Range Integration ✅
 - **Prompt 21b**: Ball Trajectory Tracing ✅
 - **Prompt 21c**: Add OpenGolfCoach Dependency ✅
+- **Prompt 21d**: Integrate OpenGolfCoach into ShotSummary ✅
+- **Prompt 21e**: Update OpenRangeEngine to Use OpenGolfCoach ✅
 - **Prompt 22**: End-to-End Tests ✅
 - **Prompt 23**: Type Checking & Linting ✅
 - **Prompt 24**: Documentation & Release ✅
@@ -63,7 +65,7 @@ GC2 Connect Desktop is a Python application that reads shot data from a Foresigh
 
 # Active Prompts
 
-## Prompt 21d: Integrate OpenGolfCoach into ShotSummary ← NEXT
+## Prompt 21d: Integrate OpenGolfCoach into ShotSummary ✅
 
 ```text
 Extend ShotSummary and ShotResult models to include OpenGolfCoach derived values.
@@ -155,42 +157,18 @@ REQUIREMENTS:
 
 ---
 
-## Prompt 21e: Update OpenRangeEngine to Use OpenGolfCoach
+## Prompt 21e: Update OpenRangeEngine to Use OpenGolfCoach ✅
 
-```text
-Modify OpenRangeEngine to enrich shot results with OpenGolfCoach derived values.
-
-CONTEXT:
-- OpenRangeEngine.simulate_shot() currently only uses our physics engine
-- We want to add OpenGolfCoach derived values to the result
-- The physics engine trajectory is still used (OpenGolfCoach doesn't provide trajectory)
-- OpenGolfCoach gives us shot classification and other useful metrics
-
-TASK:
-
-1. First, write tests in tests/unit/test_open_range/test_engine_integration.py:
-   - Test simulate_shot() returns result with derived data
-   - Test simulate_shot() works when OpenGolfCoach import fails (graceful fallback)
-   - Test simulate_manual() also includes derived data
-   - Test derived.shot_name is populated
-   - Test derived.shot_rank is populated
-
-2. Update src/gc2_connect/open_range/engine.py:
-   - Add import with fallback for OPENGOLFCOACH_AVAILABLE
-   - Add _enrich_with_opengolfcoach() method
-   - Update simulate_shot() to call enrichment when available
-
-3. Run tests: uv run pytest tests/unit/test_open_range/test_engine_integration.py -v
-
-REQUIREMENTS:
-- Graceful fallback if OpenGolfCoach not available or fails
-- No breaking changes to existing API
-- Trajectory still comes from our physics engine
-```
+Completed: Added OpenGolfCoach integration to OpenRangeEngine:
+- Added `_enrich_with_opengolfcoach()` method
+- `simulate_shot()`, `simulate_manual()`, and `simulate_test_shot()` now enrich results
+- Graceful fallback when OpenGolfCoach unavailable or fails
+- Trajectory still comes from physics engine
+- 16 new tests in `test_engine_integration.py`
 
 ---
 
-## Prompt 21f: Update Open Range UI for Shot Classification
+## Prompt 21f: Update Open Range UI for Shot Classification ← NEXT
 
 ```text
 Update the Open Range UI to display shot classification and ranking from OpenGolfCoach.
@@ -272,10 +250,8 @@ TASK:
 - Phase 6: E2E tests, type checking, documentation
 
 ## In Progress
-- **Prompt 21d**: Integrate OpenGolfCoach into ShotSummary ← NEXT
-- **Prompt 21e**: Update OpenRangeEngine
-- **Prompt 21f**: Update UI for classification
-- **Prompt 21g**: Validate distances
+- **Prompt 21f**: Update Open Range UI for Shot Classification ← NEXT
+- **Prompt 21g**: Validate OpenGolfCoach vs Physics Engine
 
 ## Planned
 - Phase 5c: Enhanced Visuals (25-26)

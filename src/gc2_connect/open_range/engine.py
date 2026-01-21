@@ -5,21 +5,32 @@
 This module provides:
 - OpenRangeEngine: Processes GC2ShotData through physics simulation
 - Test shot generation for UI testing and demos
+- OpenGolfCoach integration for shot classification and metrics
 
 The OpenRangeEngine wraps the PhysicsEngine and provides a clean interface
-for integrating with the GC2 Connect application.
+for integrating with the GC2 Connect application. When available, it enriches
+shot results with OpenGolfCoach derived data (shot classification, ranking,
+estimated club data).
 """
 
 from __future__ import annotations
 
+import logging
 import random
 from typing import TYPE_CHECKING
 
+from gc2_connect.models import GC2ShotData
 from gc2_connect.open_range.models import Conditions, ShotResult
 from gc2_connect.open_range.physics.engine import PhysicsEngine
+from gc2_connect.open_range.physics.opengolfcoach_wrapper import is_available
+
+# Check if OpenGolfCoach is available at module load time
+OPENGOLFCOACH_AVAILABLE = is_available()
 
 if TYPE_CHECKING:
-    from gc2_connect.models import GC2ShotData
+    pass
+
+logger = logging.getLogger(__name__)
 
 
 # Typical club parameters for test shots
@@ -97,15 +108,18 @@ class OpenRangeEngine:
             shot: GC2ShotData from launch monitor.
 
         Returns:
-            ShotResult with trajectory and summary.
+            ShotResult with trajectory, summary, and OpenGolfCoach derived values
+            (when available).
         """
-        return self.physics.simulate(
+        result = self.physics.simulate(
             ball_speed_mph=shot.ball_speed,
             vla_deg=shot.launch_angle,
             hla_deg=shot.horizontal_launch_angle,
             backspin_rpm=shot.back_spin,
             sidespin_rpm=shot.side_spin,
         )
+
+        return self._enrich_with_opengolfcoach(result, shot)
 
     def simulate_manual(
         self,
@@ -125,15 +139,28 @@ class OpenRangeEngine:
             sidespin_rpm: Sidespin in RPM.
 
         Returns:
-            ShotResult with trajectory and summary.
+            ShotResult with trajectory, summary, and OpenGolfCoach derived values
+            (when available).
         """
-        return self.physics.simulate(
+        result = self.physics.simulate(
             ball_speed_mph=ball_speed_mph,
             vla_deg=vla_deg,
             hla_deg=hla_deg,
             backspin_rpm=backspin_rpm,
             sidespin_rpm=sidespin_rpm,
         )
+
+        # Create a synthetic GC2ShotData for enrichment
+        synthetic_shot = GC2ShotData(
+            shot_id=0,
+            ball_speed=ball_speed_mph,
+            launch_angle=vla_deg,
+            horizontal_launch_angle=hla_deg,
+            back_spin=backspin_rpm,
+            side_spin=sidespin_rpm,
+        )
+
+        return self._enrich_with_opengolfcoach(result, synthetic_shot)
 
     def simulate_test_shot(self, club: str = "Driver") -> ShotResult:
         """Generate a realistic test shot for given club.
@@ -145,7 +172,8 @@ class OpenRangeEngine:
                  Defaults to "Driver".
 
         Returns:
-            ShotResult for a typical shot with that club.
+            ShotResult for a typical shot with that club, including OpenGolfCoach
+            derived values when available.
         """
         # Get club profile or default to driver
         profile = CLUB_PROFILES.get(club, CLUB_PROFILES["Driver"])
@@ -162,7 +190,8 @@ class OpenRangeEngine:
         # Small random horizontal launch angle
         hla = random.uniform(-1.5, 1.5)
 
-        return self.physics.simulate(
+        # Use simulate_manual to get enriched result
+        return self.simulate_manual(
             ball_speed_mph=speed,
             vla_deg=vla,
             hla_deg=hla,
@@ -178,3 +207,29 @@ class OpenRangeEngine:
             List of club names that can be used with simulate_test_shot.
         """
         return list(CLUB_PROFILES.keys())
+
+    def _enrich_with_opengolfcoach(self, result: ShotResult, shot: GC2ShotData) -> ShotResult:
+        """Enrich a ShotResult with OpenGolfCoach derived values.
+
+        This method adds shot classification, ranking, and other metrics from
+        OpenGolfCoach to the result. If OpenGolfCoach is unavailable or fails,
+        the original result is returned unchanged.
+
+        Args:
+            result: The ShotResult from physics simulation.
+            shot: The GC2ShotData used for OpenGolfCoach calculation.
+
+        Returns:
+            ShotResult with derived field populated, or original result on failure.
+        """
+        if not OPENGOLFCOACH_AVAILABLE:
+            logger.debug("OpenGolfCoach not available, returning result without derived data")
+            return result
+
+        try:
+            from gc2_connect.open_range.physics.enrichment import enrich_shot_result
+
+            return enrich_shot_result(result, shot)
+        except Exception:
+            logger.exception("Failed to enrich result with OpenGolfCoach data")
+            return result
