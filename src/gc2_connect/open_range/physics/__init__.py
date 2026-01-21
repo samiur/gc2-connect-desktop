@@ -9,6 +9,7 @@ from gc2_connect.open_range.physics.aerodynamics import (
     get_lift_coefficient,
 )
 from gc2_connect.open_range.physics.engine import PhysicsEngine
+from gc2_connect.open_range.physics.enrichment import enrich_shot_result
 from gc2_connect.open_range.physics.ground import GroundPhysics
 from gc2_connect.open_range.physics.trajectory import (
     FlightSimulator,
@@ -34,6 +35,8 @@ __all__ = [
     # Physics Engine
     "GroundPhysics",
     "PhysicsEngine",
+    # Enrichment
+    "enrich_shot_result",
     # Trajectory
     "FlightSimulator",
     "SimulationState",

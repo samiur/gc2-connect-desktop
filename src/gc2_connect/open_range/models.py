@@ -138,6 +138,41 @@ class Conditions(BaseModel):
     ] = 0.0
 
 
+class DerivedShotData(BaseModel):
+    """Shot data derived from OpenGolfCoach calculations.
+
+    Contains additional metrics not computed by the physics engine, including
+    shot classification, quality ranking, and estimated club data.
+    """
+
+    # Shot classification
+    shot_name: Annotated[str, Field(description="Human-readable shot classification")] = "Unknown"
+    shot_rank: Annotated[str, Field(description="Shot quality rank (S+, S, A, B, C, D, E)")] = "D"
+    shot_color_rgb: Annotated[str, Field(description="Hex color for UI display")] = "#808080"
+
+    # Performance metrics
+    smash_factor: Annotated[float | None, Field(description="Ball speed / club speed ratio")] = None
+
+    # Estimated club data (from ball data)
+    estimated_club_speed_mph: Annotated[float | None, Field(description="Estimated club speed")] = (
+        None
+    )
+    estimated_club_path_deg: Annotated[float | None, Field(description="Estimated club path")] = (
+        None
+    )
+    estimated_face_angle_deg: Annotated[float | None, Field(description="Estimated face angle")] = (
+        None
+    )
+
+    # OpenGolfCoach distance calculations (for comparison with physics engine)
+    ogc_carry_distance: Annotated[
+        float | None, Field(description="Carry distance from OpenGolfCoach (yards)")
+    ] = None
+    ogc_total_distance: Annotated[
+        float | None, Field(description="Total distance from OpenGolfCoach (yards)")
+    ] = None
+
+
 class ShotResult(BaseModel):
     """Complete simulation result."""
 
@@ -145,3 +180,6 @@ class ShotResult(BaseModel):
     summary: Annotated[ShotSummary, Field(description="Shot summary metrics")]
     launch_data: Annotated[LaunchData, Field(description="Input launch conditions")]
     conditions: Annotated[Conditions, Field(description="Environmental conditions")]
+    derived: Annotated[
+        DerivedShotData | None, Field(description="OpenGolfCoach derived values")
+    ] = None

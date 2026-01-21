@@ -42,13 +42,13 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Write tests in tests/unit/test_opengolfcoach_wrapper.py
   - [x] Handle import errors gracefully (fallback to custom physics)
 
-- [ ] **Prompt 21d**: Integrate OpenGolfCoach into ShotSummary ← NEXT
-  - [ ] Write tests for extended models
-  - [ ] Create DerivedShotData model (shot_name, shot_rank, shot_color_rgb, etc.)
-  - [ ] Update ShotResult to include optional derived field
-  - [ ] Ensure backwards compatibility (derived is optional)
+- [x] **Prompt 21d**: Integrate OpenGolfCoach into ShotSummary
+  - [x] Write tests for extended models
+  - [x] Create DerivedShotData model (shot_name, shot_rank, shot_color_rgb, etc.)
+  - [x] Update ShotResult to include optional derived field
+  - [x] Ensure backwards compatibility (derived is optional)
 
-- [ ] **Prompt 21e**: Update OpenRangeEngine to Use OpenGolfCoach
+- [ ] **Prompt 21e**: Update OpenRangeEngine to Use OpenGolfCoach ← NEXT
   - [ ] Write tests for engine integration
   - [ ] Update simulate_shot() to enrich results with OpenGolfCoach data
   - [ ] Add _enrich_with_opengolfcoach() method
