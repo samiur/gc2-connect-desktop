@@ -34,6 +34,7 @@ def _notify_callbacks(callbacks: list[Callable[..., None]], *args: Any) -> None:
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 921
+HEARTBEAT_INTERVAL_SECONDS = 6.0
 
 
 class GSProClient:
@@ -58,6 +59,15 @@ class GSProClient:
         self._reader_task: asyncio.Task[None] | None = None
         self._reader_running = False
 
+        # Match state tracking for heartbeat logic
+        self._match_started = False
+        self._hardware_ready = False
+        self._heartbeat_task: asyncio.Task[None] | None = None
+
+        # Register internal handlers for match state changes
+        self._match_started_callbacks.append(self._on_match_started)
+        self._match_ended_callbacks.append(self._on_match_ended)
+
     @property
     def is_connected(self) -> bool:
         return self._connected
@@ -69,6 +79,37 @@ class GSProClient:
     @property
     def current_player(self) -> dict[str, Any] | None:
         return self._current_player
+
+    @property
+    def match_started(self) -> bool:
+        """Whether GSPro match is currently active."""
+        return self._match_started
+
+    @property
+    def hardware_ready(self) -> bool:
+        """Whether GC2 hardware is ready (green light)."""
+        return self._hardware_ready
+
+    @property
+    def is_ready_to_report(self) -> bool:
+        """Whether we should report LaunchMonitorIsReady=true.
+
+        Only true when both:
+        - GC2 hardware is ready (green light)
+        - GSPro match is active
+        """
+        return self._hardware_ready and self._match_started
+
+    def set_hardware_ready(self, ready: bool) -> None:
+        """Update hardware ready state from GC2.
+
+        Called when GC2 status changes (FLAGS in 0M message).
+        """
+        if self._hardware_ready != ready:
+            self._hardware_ready = ready
+            # Send status update if match is active
+            if self._match_started:
+                self.send_heartbeat()
 
     def add_response_callback(self, callback: Callable[[GSProResponse], None]) -> None:
         """Add a callback for GSPro responses."""
@@ -125,6 +166,54 @@ class GSProClient:
         """Remove a match ended callback."""
         if callback in self._match_ended_callbacks:
             self._match_ended_callbacks.remove(callback)
+
+    # -------------------------------------------------------------------------
+    # Match state and heartbeat timer management
+    # -------------------------------------------------------------------------
+
+    def _on_match_started(self) -> None:
+        """Handle match started event (code 202).
+
+        Starts the heartbeat timer and sends current ready status.
+        """
+        if not self._match_started:
+            self._match_started = True
+            self._start_heartbeat_timer()
+            self.send_heartbeat()
+
+    def _on_match_ended(self) -> None:
+        """Handle match ended event (code 203).
+
+        Stops the heartbeat timer. Does not send "not ready" here;
+        the disconnect sequence handles the final "not ready" message.
+        """
+        if self._match_started:
+            self._match_started = False
+            self._stop_heartbeat_timer()
+
+    def _start_heartbeat_timer(self) -> None:
+        """Start periodic heartbeat timer."""
+        self._stop_heartbeat_timer()  # Stop any existing timer
+        try:
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            logger.info("GSPro heartbeat timer started")
+        except RuntimeError as e:
+            # No running event loop - happens in sync-only contexts
+            logger.debug(f"Could not start heartbeat timer (no event loop): {e}")
+
+    def _stop_heartbeat_timer(self) -> None:
+        """Stop the heartbeat timer."""
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
+            self._heartbeat_task = None
+            logger.info("GSPro heartbeat timer stopped")
+
+    async def _heartbeat_loop(self) -> None:
+        """Send heartbeats at regular intervals while match is active."""
+        while self._connected and self._match_started:
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+            if self._connected and self._match_started:
+                self.send_heartbeat()
 
     # -------------------------------------------------------------------------
     # Reader loop for receiving unsolicited GSPro messages
@@ -268,10 +357,11 @@ class GSProClient:
         """Cleanly disconnect from GSPro.
 
         Following OpenSkyPlus2 reference implementation:
-        1. Stop reader loop (prevent any more reads)
-        2. Send heartbeat with LaunchMonitorIsReady=false
-        3. Wait 250ms for GSPro to process
-        4. Close socket
+        1. Stop heartbeat timer (stop sending heartbeats)
+        2. Stop reader loop (prevent any more reads)
+        3. Send heartbeat with LaunchMonitorIsReady=false
+        4. Wait 250ms for GSPro to process
+        5. Close socket
 
         This tells GSPro the launch monitor is going offline gracefully
         instead of just disappearing. TCP_NODELAY ensures the heartbeat
@@ -281,25 +371,29 @@ class GSProClient:
             self._connected = False
             return
 
-        # Step 1: Stop the reader loop first
+        # Step 1: Stop the heartbeat timer
+        self._stop_heartbeat_timer()
+        self._match_started = False
+
+        # Step 2: Stop the reader loop
         self._stop_reader_loop()
 
-        # Step 2: Tell GSPro we're going offline
+        # Step 3: Tell GSPro we're going offline
         try:
             self._send_shutdown_heartbeat()
         except Exception as e:
             logger.debug(f"Error sending shutdown heartbeat: {e}")
 
-        # Step 3: Wait for GSPro to process the heartbeat
+        # Step 4: Wait for GSPro to process the heartbeat
         time.sleep(0.250)
 
-        # Step 4: Close socket
+        # Step 5: Close socket
         try:
             self._socket.close()
         except Exception:
             pass
 
-        # Step 5: Clear internal state
+        # Step 6: Clear internal state
         self._socket = None
         self._connected = False
         self._shot_number = 0
@@ -350,6 +444,9 @@ class GSProClient:
     def send_heartbeat(self) -> GSProResponse | None:
         """Send a heartbeat to GSPro.
 
+        Uses is_ready_to_report to determine LaunchMonitorIsReady value.
+        This is true only when both GC2 hardware is ready AND match is active.
+
         Note: GSPro doesn't respond to heartbeat messages, so we don't wait for a response.
         """
         if not self._connected or not self._socket:
@@ -360,7 +457,7 @@ class GSProClient:
             ShotDataOptions=GSProShotOptions(
                 ContainsBallData=False,
                 ContainsClubData=False,
-                LaunchMonitorIsReady=True,
+                LaunchMonitorIsReady=self.is_ready_to_report,
                 IsHeartBeat=True,
             ),
         )

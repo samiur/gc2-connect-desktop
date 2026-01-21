@@ -985,6 +985,10 @@ class GC2ConnectApp:
                 else:
                     self.gc2_ball_indicator.classes(remove="text-blue-400", add="text-gray-500")
 
+            # Update GSPro client hardware ready state for heartbeat logic
+            if self._gspro_mgr.client:
+                self._gspro_mgr.client.set_hardware_ready(status.is_ready)
+
             # Send status to GSPro if connected (use manager)
             if self.send_status_to_gspro and self._gspro_mgr.is_connected:
                 self._gspro_mgr.send_status(status)
