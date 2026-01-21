@@ -211,15 +211,15 @@ Target Release: v1.1.0 (with Open Range)
 
 Replace custom shot calculations with OpenGolfCoach library for improved accuracy and additional derived values.
 
-- [ ] **Prompt 21c**: Add OpenGolfCoach Dependency ← NEXT
-  - [ ] Add opengolfcoach package via uv add
-  - [ ] Create opengolfcoach_wrapper.py with OpenGolfCoachInput/Result dataclasses
-  - [ ] Implement calculate_shot() function
-  - [ ] Implement calculate_shot_from_gc2() convenience function
-  - [ ] Write tests in tests/unit/test_opengolfcoach_wrapper.py
-  - [ ] Handle import errors gracefully (fallback to custom physics)
+- [x] **Prompt 21c**: Add OpenGolfCoach Dependency
+  - [x] Add opengolfcoach package via uv add
+  - [x] Create opengolfcoach_wrapper.py with OpenGolfCoachInput/Result dataclasses
+  - [x] Implement calculate_shot() function
+  - [x] Implement calculate_shot_from_gc2() convenience function
+  - [x] Write tests in tests/unit/test_opengolfcoach_wrapper.py
+  - [x] Handle import errors gracefully (fallback to custom physics)
 
-- [ ] **Prompt 21d**: Integrate OpenGolfCoach into ShotSummary
+- [ ] **Prompt 21d**: Integrate OpenGolfCoach into ShotSummary ← NEXT
   - [ ] Write tests for extended models
   - [ ] Create DerivedShotData model (shot_name, shot_rank, shot_color_rgb, etc.)
   - [ ] Update ShotResult to include optional derived field
