@@ -603,6 +603,7 @@ version = "1.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "nicegui" },
+    { name = "opengolfcoach" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyusb" },
@@ -629,6 +630,7 @@ dev = [
 requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "nicegui", specifier = ">=1.4.0" },
+    { name = "opengolfcoach", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -1195,6 +1197,26 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/24/bf/d1bda4f6168e0b2e9e5958945e01910052158313224ada5ce1fb2e1113b8/nodeenv-1.10.0.tar.gz", hash = "sha256:996c191ad80897d076bdfba80a41994c2b47c68e224c542b48feba42ba00f8bb", size = 55611 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/b2/d0896bdcdc8d28a7fc5717c305f1a861c26e18c05047949fb371034d98bd/nodeenv-1.10.0-py2.py3-none-any.whl", hash = "sha256:5bb13e3eed2923615535339b3c620e76779af4cb4c6a90deccc9e36b274d3827", size = 23438 },
+]
+
+[[package]]
+name = "opengolfcoach"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/4a/53a0cc0af9f47faa559c4e124d72dd0289e735b4a42a136a5a1fef0a85fa/opengolfcoach-0.1.0.tar.gz", hash = "sha256:bc2aeced7fab4bc56764c8a1f8c8fe7a5f1727b41be2df67afd8e2dff21a967b", size = 56610 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/62/d6/ab8132415d7327448bd6fe9729475d46b7550b955cd0279a2449222fe281/opengolfcoach-0.1.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:391c2c324f278e0559d1dbeb1f9db554cd8a4434564b099d447b301b42260bf3", size = 254552 },
+    { url = "https://files.pythonhosted.org/packages/a1/d8/46da4ba6d520fc416c078f2a1bbb1bcddc6d6ab6179fd585def48faa38de/opengolfcoach-0.1.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:69cae6d5df7a7a1d945d588d818b383865eae54ead3dd73d8ab01b9d8d32465a", size = 265428 },
+    { url = "https://files.pythonhosted.org/packages/43/fa/e4bd9b8373972efb6cea94011fc31d1787e08574878a7264ea3f908068c2/opengolfcoach-0.1.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b81370744ac5fae0fc5eeca19eba33d644c63599d4641a07262577169e9a0262", size = 280072 },
+    { url = "https://files.pythonhosted.org/packages/66/15/bd505ddede799727bb72ff98ecf4d600dccf7d0139000edef64fa27251d2/opengolfcoach-0.1.0-cp310-cp310-win_amd64.whl", hash = "sha256:552dfcbe7b9aa6296da502b1850169388ecac30d29698f01f7b596c3ec9539f9", size = 197527 },
+    { url = "https://files.pythonhosted.org/packages/23/16/4fb83785a5e4eb115a02535da8b6c3ff229399a0e91578222c1fe156495b/opengolfcoach-0.1.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:ec29b2b00680515a2d776cb71fe3f9975bd88bdd0af10f09f74d0bd143bab0e0", size = 254552 },
+    { url = "https://files.pythonhosted.org/packages/61/e3/8480f439fbcd94e3651326d2eef0ed67a5d5730e1b5edc2d2e8e56a52dd0/opengolfcoach-0.1.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:61db3ad51bb4232e0de6e007c0ec4863c2138fa220fd50fe60d2ae1cb5516f56", size = 265428 },
+    { url = "https://files.pythonhosted.org/packages/26/6b/62f22ae639583c3fb72a4393291ca8d4d0fce90642ff8cd4a177b008e283/opengolfcoach-0.1.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4d7fddb072be4f3922b2f51e55a600a6d59665b0f3bf06a1b0385435940b11bc", size = 280072 },
+    { url = "https://files.pythonhosted.org/packages/dc/9b/5ff309ece0a1a0c68abb69967b6ab146dc54f103188dd5de3e387b4ba8b4/opengolfcoach-0.1.0-cp311-cp311-win_amd64.whl", hash = "sha256:bee5d1353c1ca09378f3d3dacc0361df1f5be8b681f87dcc0bfd3134bd537533", size = 197535 },
+    { url = "https://files.pythonhosted.org/packages/67/08/561ee2c9568660284312bc11142cc72ceccffe03c410c26122b856a9333e/opengolfcoach-0.1.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:13341222a711c7e913f360615bb767a64d66a111405ec1359ae00edd54b1e719", size = 254320 },
+    { url = "https://files.pythonhosted.org/packages/c1/03/5186b90739dc72c0db564450eeeb7cd3d6bfc9c5e279c6dae624d8d9eaf8/opengolfcoach-0.1.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:677cbeb2e7a7ec17c621b22b92669bcdaf74e4bac457ff31ea6e646c2d42c372", size = 265206 },
+    { url = "https://files.pythonhosted.org/packages/44/63/dcddbf46a3989dab00448d87015e9a9c19becc054be93a4c05a9b80aa319/opengolfcoach-0.1.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:bbfd6253ae08e171597c520d362abb7ea22a919326c44b6b2d5a0ebbd13c5888", size = 279961 },
+    { url = "https://files.pythonhosted.org/packages/82/b7/bbbe3a0269f557d7d150e134d0bb013eb713a31a5e13357a7e7d2d5e8ff7/opengolfcoach-0.1.0-cp312-cp312-win_amd64.whl", hash = "sha256:2cf9d52cd741ed6e0617509771484ad2e021229bdae1fea64b00fd0587ee7c38", size = 194115 },
 ]
 
 [[package]]
