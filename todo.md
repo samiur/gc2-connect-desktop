@@ -77,17 +77,17 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Start reader loop on connect
   - [x] Stop reader loop on disconnect
 
-- [ ] **Prompt 7d**: GSPro Match State and Heartbeat Timer ← NEXT
-  - [ ] Write tests in tests/unit/test_gspro_heartbeat.py
-  - [ ] Add match_started state tracking
-  - [ ] Add hardware_ready state tracking
-  - [ ] Implement is_ready_to_report property (hardware AND match)
-  - [ ] Start heartbeat timer on code 202 (match started)
-  - [ ] Stop heartbeat timer on code 203 (match ended)
-  - [ ] Send heartbeats every 6 seconds during active match
-  - [ ] Update send_heartbeat() to use is_ready_to_report
-  - [ ] Wire GC2 status changes to set_hardware_ready()
-  - [ ] Stop heartbeat timer on disconnect
+- [x] **Prompt 7d**: GSPro Match State and Heartbeat Timer ✅
+  - [x] Write tests in tests/unit/test_gspro_heartbeat.py
+  - [x] Add match_started state tracking
+  - [x] Add hardware_ready state tracking
+  - [x] Implement is_ready_to_report property (hardware AND match)
+  - [x] Start heartbeat timer on code 202 (match started)
+  - [x] Stop heartbeat timer on code 203 (match ended)
+  - [x] Send heartbeats every 6 seconds during active match
+  - [x] Update send_heartbeat() to use is_ready_to_report
+  - [x] Wire GC2 status changes to set_hardware_ready()
+  - [x] Stop heartbeat timer on disconnect
 
 - [x] **Prompt 8**: Auto-Reconnection Logic
   - [x] Write tests for reconnection
