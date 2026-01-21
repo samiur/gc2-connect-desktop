@@ -78,3 +78,6 @@ Thumbs.db
 # Distribution
 *.tar.gz
 *.whl
+
+# Reference repositories (not our code)
+reference/

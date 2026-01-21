@@ -3060,12 +3060,23 @@ REQUIREMENTS:
 21. **Prompt 21**: Open Range integration ✅
 21b. **Prompt 21b**: Ball trajectory tracing ✅
 
-## Phase 5b: OpenGolfCoach Integration (NEW)
+## Phase 5b: OpenGolfCoach Integration (NEW) ← NEXT
 21c. **Prompt 21c**: Add OpenGolfCoach dependency ← NEXT
 21d. **Prompt 21d**: Integrate OpenGolfCoach into ShotSummary
 21e. **Prompt 21e**: Update OpenRangeEngine to use OpenGolfCoach
 21f. **Prompt 21f**: Update Open Range UI for shot classification
 21g. **Prompt 21g**: Validate OpenGolfCoach distances vs physics engine
+
+## Phase 5c: Enhanced Driving Range Visuals (Shanktuary-inspired)
+25. **Prompt 25**: Procedural terrain and atmosphere
+26. **Prompt 26**: Multiple camera views and minimap
+
+## Phase 5d: Minigames Framework (Shanktuary-inspired)
+27. **Prompt 27**: Minigames base architecture
+28. **Prompt 28**: Putting Green minigame
+29. **Prompt 29**: Target Range minigame
+30. **Prompt 30**: Golf Darts minigame
+31. **Prompt 31**: Minigames UI and game selector
 
 ## Phase 6: Polish & Release
 22. **Prompt 22**: End-to-end tests ✅

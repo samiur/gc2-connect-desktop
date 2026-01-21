@@ -44,11 +44,29 @@ src/gc2_connect/
 ├── gspro/
 │   └── client.py        # TCP client
 ├── ui/
-│   └── app.py           # NiceGUI interface
-└── config/              # Settings management
+│   ├── app.py           # NiceGUI interface
+│   └── components/      # UI components (mode_selector, open_range_view, etc.)
+├── open_range/          # Open Range feature
+│   ├── models.py        # Trajectory/shot models
+│   ├── engine.py        # High-level Open Range engine
+│   ├── physics/         # Physics simulation (aerodynamics, trajectory, ground)
+│   └── visualization/   # 3D rendering (range_scene, ball_animation)
+├── services/            # Business logic
+│   ├── shot_router.py   # Mode-based shot routing
+│   ├── history.py       # Shot history manager
+│   └── export.py        # CSV export
+├── config/              # Settings management
+└── minigames/           # (PLANNED) Minigames framework
+    ├── base.py          # BaseMinigame, GameManager
+    ├── putting_green.py # Putting practice
+    ├── target_range.py  # Target scoring
+    └── golf_darts.py    # Darts with VLA/HLA mapping
 
 tools/
 └── mock_gspro_server.py # Testing utility
+
+reference/               # (git-ignored) Reference implementations
+└── shanktuary-minigames/# Shanktuary Golf minigames for reference
 
 tests/simulators/        # Test infrastructure
 ├── timing.py            # TimeController for deterministic tests
@@ -122,6 +140,12 @@ uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
 5. **Ball Status**: GC2 sends 0M messages with FLAGS (1=red light, 7=green light) and BALLS count for UI indicators
 6. **Shutdown Handling**: App has proper shutdown handlers for GSPro/GC2 disconnection (signal handlers, atexit, NiceGUI on_shutdown)
 
+## Upcoming Features (see plan.md/todo.md)
+
+- **OpenGolfCoach Integration** (Phase 5b): Shot classification, ranking (S+ to E), smash factor
+- **Enhanced Visuals** (Phase 5c): Procedural terrain, fog, trees, multiple camera views, minimap
+- **Minigames** (Phase 5d): Putting Green, Target Range, Golf Darts (301/501/Cricket)
+
 ## Related Documentation
 
 - `docs/PRD.md` - Product requirements
@@ -131,6 +155,37 @@ uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
 - `README.md` - User documentation
 - `plan.md` - Implementation prompts and roadmap
 - `todo.md` - Current implementation status
+
+## Reference Implementations
+
+### Shanktuary Golf Minigames
+A reference Electron-based golf minigames platform is available at `reference/shanktuary-minigames/` (git-ignored, not committed). Key files for implementation reference:
+
+| File | What to reference |
+|------|-------------------|
+| `golf-par3.html` | Procedural terrain, camera views, tracer, physics regimes |
+| `putting-green.html` | Stimpmeter physics, putting visualization |
+| `darts-3d.html` | VLA/HLA → dartboard mapping, scoring modes |
+| `empirical-golf-model.js` | Shot distance prediction model |
+| `opengolfcoach.js` | OpenGolfCoach WASM integration |
+| `bowling.html` | Cannon.js physics for pins |
+
+To clone the reference repo (if not present):
+```bash
+git clone https://github.com/ShanktuaryGolf/Minigames.git reference/shanktuary-minigames
+```
+
+### OpenGolfCoach Library
+PyPI: https://pypi.org/project/opengolfcoach/
+GitHub: https://github.com/OpenLaunchLabs/open-golf-coach
+
+Provides `calculate_derived_values(json_input: str) -> str` for:
+- Shot classification (shot_name: "Driver", "7-Iron", etc.)
+- Shot ranking (shot_rank: S+, S, A, B, C, D, E)
+- Smash factor, carry/total distance
+- Estimated club data from ball data
+
+Integration planned in Prompts 21c-21g (Phase 5b).
 
 ## Code Style
 

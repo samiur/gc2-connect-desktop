@@ -247,6 +247,66 @@ Replace custom shot calculations with OpenGolfCoach library for improved accurac
 
 ---
 
+## Phase 5c: Enhanced Driving Range Visuals (Shanktuary-inspired)
+
+Improve Open Range visuals with procedural terrain, atmospheric effects, and multiple camera views.
+
+- [ ] **Prompt 25**: Procedural Terrain and Atmosphere
+  - [ ] Write tests in tests/unit/test_open_range/test_enhanced_terrain.py
+  - [ ] Add terrain undulations to ground plane (sine/cosine waves)
+  - [ ] Add vertex color blending (fairway → light rough → heavy rough)
+  - [ ] Add atmospheric fog (sky blue, 50-300m)
+  - [ ] Add procedural boundary trees (30-40 cones along edges)
+  - [ ] Test performance stays above 30fps
+
+- [ ] **Prompt 26**: Multiple Camera Views and Minimap
+  - [ ] Write tests in tests/unit/test_open_range/test_camera_views.py
+  - [ ] Create camera view presets (behind, follow, overhead, side, green)
+  - [ ] Add camera control buttons to UI
+  - [ ] Implement follow camera for ball animation
+  - [ ] Add minimap component (orthographic overhead view)
+  - [ ] Test smooth camera transitions
+
+---
+
+## Phase 5d: Minigames Framework (Shanktuary-inspired)
+
+Add minigames to Open Range: Putting Green, Target Range, Golf Darts.
+
+- [ ] **Prompt 27**: Minigames Base Architecture
+  - [ ] Write tests in tests/unit/test_minigames/test_base.py
+  - [ ] Create src/gc2_connect/minigames/__init__.py
+  - [ ] Create base.py with BaseMinigame, GameType, GameScore
+  - [ ] Create manager.py with GameManager
+  - [ ] Wire GameManager into ShotRouter
+
+- [ ] **Prompt 28**: Putting Green Minigame
+  - [ ] Write tests in tests/unit/test_minigames/test_putting_green.py
+  - [ ] Implement PuttingGreenGame with stimpmeter physics
+  - [ ] Create putting green visualization (circular green, hole, rings)
+  - [ ] Add putting-specific UI (stimpmeter slider, distance selector, stats)
+
+- [ ] **Prompt 29**: Target Range Minigame
+  - [ ] Write tests in tests/unit/test_minigames/test_target_range.py
+  - [ ] Implement TargetRangeGame with concentric scoring zones
+  - [ ] Create visualization (colored rings, landing marker)
+  - [ ] Add game modes (Practice, Challenge, Ladder)
+
+- [ ] **Prompt 30**: Golf Darts Minigame
+  - [ ] Write tests in tests/unit/test_minigames/test_golf_darts.py
+  - [ ] Implement GolfDartsGame mapping VLA/HLA to dartboard
+  - [ ] Create dartboard visualization
+  - [ ] Implement 301/501/Cricket game modes
+
+- [ ] **Prompt 31**: Minigames UI and Game Selector
+  - [ ] Write tests in tests/integration/test_minigames_ui.py
+  - [ ] Create game_selector.py with GameSelector dialog
+  - [ ] Add "Games" button to app header
+  - [ ] Wire game switching into app.py
+  - [ ] Test full flow: select → play → switch
+
+---
+
 ## Phase 6: Polish & Release
 
 - [x] **Prompt 22**: End-to-End Tests
@@ -307,6 +367,7 @@ uv run python tools/mock_gspro_server.py
 
 ### Decisions Made
 
+- **Shanktuary Golf Research (2026-01-21)**: Analyzed Shanktuary Golf minigames platform (https://github.com/ShanktuaryGolf/Minigames) for inspiration. Key findings: (1) They use same tech stack (Three.js, OpenGolfCoach, port 921), (2) Procedural terrain with vertex colors avoids texture loading, (3) 7 camera views improve visualization, (4) Minigames (Putting Green, Golf Darts, Target Range) are compelling additions. Adopted: enhanced driving range visuals first (terrain, fog, trees, cameras, minimap), then minigames framework. Staying with NiceGUI ui.scene for simplicity.
 - **OpenGolfCoach Integration (2026-01-21)**: Replacing custom shot calculations with the OpenGolfCoach library (https://pypi.org/project/opengolfcoach/). Key benefits: (1) Shot classification (shot_name: "Straight", "Push Slice", etc.), (2) Shot quality ranking (S+, S, A, B, C, D, E), (3) Smash factor calculation, (4) Estimated club data from ball data, (5) Distance calculations validated against industry standards. The custom physics engine is KEPT for trajectory visualization (OpenGolfCoach doesn't provide trajectory points, only final distances). OpenGolfCoach enriches ShotResult with a `derived` field containing classification and metrics. Graceful fallback if library unavailable.
 - **GSPro Response Reader and Heartbeat Timer (2026-01-15)**: After analyzing the OpenSkyPlus2 C# client (docs/GsProApi.cs), identified key missing features: (1) Background reader loop to receive unsolicited GSPro messages (codes 201, 202, 203), (2) Match state tracking based on code 202/203 responses, (3) Periodic heartbeat timer (6 second intervals) that only runs during active matches, (4) Combined ready state logic (hardware_ready AND match_started). These changes will make our client behave more like the reference implementation and improve GSPro compatibility.
 - **GSPro Clean Disconnect (2026-01-14)**: Following OpenSkyPlus2 reference implementation. GSPro doesn't have a documented clean disconnect protocol, but the recommended approach is: (1) send heartbeat with LaunchMonitorIsReady=false, (2) flush socket, (3) wait 250ms, (4) close socket. This tells GSPro the launch monitor is going offline gracefully instead of just disappearing. See docs/GSPRO_DISCONNECT.md for details.
