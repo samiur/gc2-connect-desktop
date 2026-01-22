@@ -79,9 +79,17 @@ Target Release: v1.1.0 (with Open Range)
 
 ---
 
-## Phase 5c: Enhanced Driving Range Visuals (PLANNED)
+## Phase 5c: Enhanced Driving Range Visuals (IN PROGRESS)
 
-- [ ] **Prompt 25**: Procedural Terrain and Atmosphere
+- [x] **Prompt 25**: Procedural Terrain and Atmosphere
+  - [x] Add atmospheric fog for depth perception (FOG_NEAR=100, FOG_FAR=350)
+  - [x] Add terrain undulations using procedural sine waves
+  - [x] Add rough areas (darker grass) on fairway edges
+  - [x] Enhance tree backdrop with height/color variation
+  - [x] Add calculate_terrain_height() function
+  - [x] Support fog toggle via fog_enabled property
+  - [x] Write tests in test_procedural_terrain.py
+
 - [ ] **Prompt 26**: Multiple Camera Views and Minimap
 
 ---
