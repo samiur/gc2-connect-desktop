@@ -90,7 +90,18 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Support fog toggle via fog_enabled property
   - [x] Write tests in test_procedural_terrain.py
 
-- [ ] **Prompt 26**: Multiple Camera Views and Minimap
+- [x] **Prompt 26**: Multiple Camera Views and Minimap
+  - [x] Create CameraMode enum with 5 presets (Behind Ball, Tee Box, Follow, Overhead, Green)
+  - [x] Implement CameraController for mode management and position calculation
+  - [x] Create CameraPreset dataclass for camera configurations
+  - [x] Add smooth camera interpolation utilities
+  - [x] Create MinimapRenderer with orthographic top-down view
+  - [x] Add dynamic zoom based on ball-to-target distance
+  - [x] Add landing marker tracking for shot dispersion
+  - [x] Update BallAnimator to support camera mode switching
+  - [x] Add camera controls UI (dropdown, cycle button)
+  - [x] Add minimap toggle and overlay display
+  - [x] Write tests in test_camera_system.py and test_minimap.py
 
 ---
 
