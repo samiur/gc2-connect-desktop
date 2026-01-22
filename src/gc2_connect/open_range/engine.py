@@ -20,7 +20,7 @@ import random
 from typing import TYPE_CHECKING
 
 from gc2_connect.models import GC2ShotData
-from gc2_connect.open_range.models import Conditions, ShotResult
+from gc2_connect.open_range.models import Conditions, Phase, ShotResult, TrajectoryPoint
 from gc2_connect.open_range.physics.engine import PhysicsEngine
 from gc2_connect.open_range.physics.opengolfcoach_wrapper import is_available
 
@@ -31,6 +31,90 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+
+def scale_trajectory_to_ogc(
+    trajectory: list[TrajectoryPoint],
+    ogc_carry: float,
+    ogc_total: float,
+) -> list[TrajectoryPoint]:
+    """Scale trajectory points to match OGC distances.
+
+    This function adjusts trajectory coordinates so the visualization
+    matches the OGC-reported carry and total distances. It:
+    1. Identifies the carry point (first landing/bounce)
+    2. Scales flight phase to match OGC carry
+    3. Scales ground phase to match OGC roll
+
+    Args:
+        trajectory: List of TrajectoryPoint from physics simulation.
+        ogc_carry: OGC carry distance in yards.
+        ogc_total: OGC total distance in yards.
+
+    Returns:
+        New list of TrajectoryPoint with scaled coordinates.
+    """
+    import math
+
+    if not trajectory:
+        return trajectory
+
+    # Find the carry point (first BOUNCE or ROLLING phase)
+    carry_idx = None
+    for i, pt in enumerate(trajectory):
+        if pt.phase in (Phase.BOUNCE, Phase.ROLLING, Phase.STOPPED) and pt.y <= 0.1:
+            carry_idx = i
+            break
+
+    # If no carry point found, use last flight point
+    if carry_idx is None:
+        for i in range(len(trajectory) - 1, -1, -1):
+            if trajectory[i].phase == Phase.FLIGHT:
+                carry_idx = i
+                break
+
+    if carry_idx is None or carry_idx == 0:
+        # Can't scale without a valid carry point
+        return trajectory
+
+    # Calculate physics distances at carry and final
+    carry_pt = trajectory[carry_idx]
+    final_pt = trajectory[-1]
+
+    physics_carry = math.sqrt(carry_pt.x**2 + carry_pt.z**2)
+    physics_total = math.sqrt(final_pt.x**2 + final_pt.z**2)
+
+    # Avoid division by zero
+    if physics_carry < 0.1 or physics_total < 0.1:
+        return trajectory
+
+    # Calculate scale factors
+    carry_scale = ogc_carry / physics_carry if physics_carry > 0 else 1.0
+    total_scale = ogc_total / physics_total if physics_total > 0 else 1.0
+
+    # Build scaled trajectory
+    scaled = []
+    for i, pt in enumerate(trajectory):
+        if i <= carry_idx:
+            # Flight phase: scale to match OGC carry
+            scale = carry_scale
+        else:
+            # Ground phase: interpolate scale from carry to total
+            # At carry_idx, scale = carry_scale; at end, scale = total_scale
+            progress = (i - carry_idx) / max(1, len(trajectory) - 1 - carry_idx)
+            scale = carry_scale + (total_scale - carry_scale) * progress
+
+        scaled.append(
+            TrajectoryPoint(
+                t=pt.t,
+                x=pt.x * scale,
+                y=pt.y,  # Keep height unchanged
+                z=pt.z * scale,
+                phase=pt.phase,
+            )
+        )
+
+    return scaled
 
 
 # Typical club parameters for test shots
@@ -284,6 +368,9 @@ class OpenRangeEngine:
                 target_total_yards=ogc_total,
             )
 
+            # Scale trajectory to match OGC distances
+            scaled_trajectory = scale_trajectory_to_ogc(result.trajectory, ogc_carry, ogc_total)
+
             # Override summary with OGC distances (authoritative values)
             # Keep other physics-derived values (max_height, offline, times, bounces)
             ogc_summary = ShotSummary(
@@ -299,7 +386,7 @@ class OpenRangeEngine:
             )
 
             return ShotResult(
-                trajectory=result.trajectory,
+                trajectory=scaled_trajectory,
                 summary=ogc_summary,
                 launch_data=result.launch_data,
                 conditions=result.conditions,
