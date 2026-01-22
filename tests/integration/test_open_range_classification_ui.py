@@ -134,9 +134,9 @@ class TestRankColors:
 
         for rank, color_class in RANK_COLORS.items():
             # Should be a Tailwind color class
-            assert color_class.startswith("text-") or color_class.startswith(
-                "bg-"
-            ), f"Invalid color class for rank {rank}: {color_class}"
+            assert color_class.startswith("text-") or color_class.startswith("bg-"), (
+                f"Invalid color class for rank {rank}: {color_class}"
+            )
 
     def test_rank_colors_are_distinct(self) -> None:
         """Test that each rank has a distinct color."""
@@ -274,9 +274,9 @@ class TestRankBadgeColors:
 
         color = RANK_COLORS.get("S+", "")
         # Gold is typically yellow-500/600 or amber in Tailwind
-        assert (
-            "yellow" in color.lower() or "amber" in color.lower() or "gold" in color.lower()
-        ), f"S+ should be gold-ish, got {color}"
+        assert "yellow" in color.lower() or "amber" in color.lower() or "gold" in color.lower(), (
+            f"S+ should be gold-ish, got {color}"
+        )
 
     def test_s_is_silver_color(self) -> None:
         """Test that S rank has silver/gray color."""
@@ -284,9 +284,9 @@ class TestRankBadgeColors:
 
         color = RANK_COLORS.get("S", "")
         # Silver is typically gray/slate
-        assert (
-            "gray" in color.lower() or "slate" in color.lower() or "silver" in color.lower()
-        ), f"S should be silver-ish, got {color}"
+        assert "gray" in color.lower() or "slate" in color.lower() or "silver" in color.lower(), (
+            f"S should be silver-ish, got {color}"
+        )
 
     def test_a_is_green_color(self) -> None:
         """Test that A rank has green color."""
@@ -307,9 +307,9 @@ class TestRankBadgeColors:
         from gc2_connect.ui.components.open_range_view import RANK_COLORS
 
         color = RANK_COLORS.get("C", "")
-        assert (
-            "purple" in color.lower() or "violet" in color.lower()
-        ), f"C should be purple, got {color}"
+        assert "purple" in color.lower() or "violet" in color.lower(), (
+            f"C should be purple, got {color}"
+        )
 
     def test_d_is_orange_color(self) -> None:
         """Test that D rank has orange color."""

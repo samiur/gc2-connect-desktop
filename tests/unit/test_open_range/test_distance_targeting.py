@@ -229,9 +229,9 @@ class TestPhysicsEngineSimulateGroundToTarget:
 
         # Total should be within 15% of target (bounces add distance)
         diff_pct = abs(result.summary.total_distance - target_total) / target_total * 100
-        assert (
-            diff_pct < 15.0
-        ), f"Total {result.summary.total_distance:.1f} vs target {target_total:.1f}"
+        assert diff_pct < 15.0, (
+            f"Total {result.summary.total_distance:.1f} vs target {target_total:.1f}"
+        )
 
     def test_trajectory_includes_all_phases(self) -> None:
         """Test that result trajectory includes flight, bounce, roll, and stopped."""

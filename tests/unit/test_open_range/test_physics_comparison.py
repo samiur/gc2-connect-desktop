@@ -142,15 +142,15 @@ class TestDriverShotComparison:
         result = engine.simulate_shot(gc2_shot)
 
         # Both engines should produce reasonable driver distance
-        assert (
-            230 <= result.summary.carry_distance <= 290
-        ), f"Physics engine carry out of range: {result.summary.carry_distance:.1f}yd"
+        assert 230 <= result.summary.carry_distance <= 290, (
+            f"Physics engine carry out of range: {result.summary.carry_distance:.1f}yd"
+        )
 
         assert result.derived is not None
         assert result.derived.ogc_carry_distance is not None
-        assert (
-            230 <= result.derived.ogc_carry_distance <= 290
-        ), f"OGC carry out of range: {result.derived.ogc_carry_distance:.1f}yd"
+        assert 230 <= result.derived.ogc_carry_distance <= 290, (
+            f"OGC carry out of range: {result.derived.ogc_carry_distance:.1f}yd"
+        )
 
 
 class TestSevenIronShotComparison:
@@ -256,15 +256,15 @@ class TestSevenIronShotComparison:
 
         result = engine.simulate_shot(gc2_shot)
 
-        assert (
-            140 <= result.summary.carry_distance <= 180
-        ), f"Physics engine carry out of range: {result.summary.carry_distance:.1f}yd"
+        assert 140 <= result.summary.carry_distance <= 180, (
+            f"Physics engine carry out of range: {result.summary.carry_distance:.1f}yd"
+        )
 
         assert result.derived is not None
         assert result.derived.ogc_carry_distance is not None
-        assert (
-            140 <= result.derived.ogc_carry_distance <= 180
-        ), f"OGC carry out of range: {result.derived.ogc_carry_distance:.1f}yd"
+        assert 140 <= result.derived.ogc_carry_distance <= 180, (
+            f"OGC carry out of range: {result.derived.ogc_carry_distance:.1f}yd"
+        )
 
 
 class TestWedgeShotComparison:
@@ -365,15 +365,15 @@ class TestWedgeShotComparison:
 
         result = engine.simulate_shot(gc2_shot)
 
-        assert (
-            100 <= result.summary.carry_distance <= 140
-        ), f"Physics engine carry out of range: {result.summary.carry_distance:.1f}yd"
+        assert 100 <= result.summary.carry_distance <= 140, (
+            f"Physics engine carry out of range: {result.summary.carry_distance:.1f}yd"
+        )
 
         assert result.derived is not None
         assert result.derived.ogc_carry_distance is not None
-        assert (
-            100 <= result.derived.ogc_carry_distance <= 140
-        ), f"OGC carry out of range: {result.derived.ogc_carry_distance:.1f}yd"
+        assert 100 <= result.derived.ogc_carry_distance <= 140, (
+            f"OGC carry out of range: {result.derived.ogc_carry_distance:.1f}yd"
+        )
 
 
 class TestMultipleClubsComparison:
@@ -463,12 +463,12 @@ class TestMultipleClubsComparison:
             pytest.skip("OGC distances not available for all clubs")
 
         # Both engines should have Driver > 7-Iron > SW
-        assert (
-            physics_distances[0] > physics_distances[1] > physics_distances[2]
-        ), f"Physics distance ordering wrong: {physics_distances}"
-        assert (
-            ogc_distances[0] > ogc_distances[1] > ogc_distances[2]
-        ), f"OGC distance ordering wrong: {ogc_distances}"
+        assert physics_distances[0] > physics_distances[1] > physics_distances[2], (
+            f"Physics distance ordering wrong: {physics_distances}"
+        )
+        assert ogc_distances[0] > ogc_distances[1] > ogc_distances[2], (
+            f"OGC distance ordering wrong: {ogc_distances}"
+        )
 
 
 class TestGracefulSkipping:

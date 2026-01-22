@@ -50,9 +50,9 @@ class TestValidationAgainstNathanModel:
         expected = 275.0
         tolerance = expected * 0.05  # 5%
 
-        assert carry_yards == pytest.approx(
-            expected, abs=tolerance
-        ), f"Driver High carry: {carry_yards:.1f} yds (expected {expected} ±{tolerance:.1f})"
+        assert carry_yards == pytest.approx(expected, abs=tolerance), (
+            f"Driver High carry: {carry_yards:.1f} yds (expected {expected} ±{tolerance:.1f})"
+        )
 
     def test_driver_mid_carry(self, simulator: FlightSimulator) -> None:
         """Test driver shot at 160 mph, 11.0° launch, 3000 rpm.
@@ -71,9 +71,9 @@ class TestValidationAgainstNathanModel:
         expected = 259.0
         tolerance = expected * 0.03  # 3%
 
-        assert carry_yards == pytest.approx(
-            expected, abs=tolerance
-        ), f"Driver Mid carry: {carry_yards:.1f} yds (expected {expected} ±{tolerance:.1f})"
+        assert carry_yards == pytest.approx(expected, abs=tolerance), (
+            f"Driver Mid carry: {carry_yards:.1f} yds (expected {expected} ±{tolerance:.1f})"
+        )
 
     def test_7_iron_carry(self, simulator: FlightSimulator) -> None:
         """Test 7-iron shot at 120 mph, 16.3° launch, 7097 rpm.
@@ -92,9 +92,9 @@ class TestValidationAgainstNathanModel:
         expected = 172.0
         tolerance = expected * 0.05  # 5%
 
-        assert carry_yards == pytest.approx(
-            expected, abs=tolerance
-        ), f"7-Iron carry: {carry_yards:.1f} yds (expected {expected} ±{tolerance:.1f})"
+        assert carry_yards == pytest.approx(expected, abs=tolerance), (
+            f"7-Iron carry: {carry_yards:.1f} yds (expected {expected} ±{tolerance:.1f})"
+        )
 
     def test_wedge_carry(self, simulator: FlightSimulator) -> None:
         """Test wedge shot at 102 mph, 24.2° launch, 9304 rpm.
@@ -113,9 +113,9 @@ class TestValidationAgainstNathanModel:
         expected = 136.0
         tolerance = expected * 0.05  # 5%
 
-        assert carry_yards == pytest.approx(
-            expected, abs=tolerance
-        ), f"Wedge carry: {carry_yards:.1f} yds (expected {expected} ±{tolerance:.1f})"
+        assert carry_yards == pytest.approx(expected, abs=tolerance), (
+            f"Wedge carry: {carry_yards:.1f} yds (expected {expected} ±{tolerance:.1f})"
+        )
 
 
 class TestPhysicsEngineValidation:
