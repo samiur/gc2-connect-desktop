@@ -238,8 +238,9 @@ class OpenRangeEngine:
         This is the core hybrid simulation method that:
         1. Gets OGC distances early (if available)
         2. Runs flight physics to get trajectory and landing state
-        3. Runs ground physics calibrated to hit OGC total distance
-        4. Falls back to pure physics if OGC unavailable
+        3. Runs ground physics for trajectory visualization
+        4. Overrides summary distances with OGC values (authoritative)
+        5. Falls back to pure physics if OGC unavailable
 
         Args:
             ball_speed_mph: Ball speed in mph.
@@ -250,8 +251,9 @@ class OpenRangeEngine:
             gc2_shot: GC2ShotData for OGC distance calculation.
 
         Returns:
-            ShotResult with trajectory hitting OGC target (or pure physics fallback).
+            ShotResult with OGC distances in summary (or pure physics fallback).
         """
+        from gc2_connect.open_range.models import ShotSummary
         from gc2_connect.open_range.physics.opengolfcoach_wrapper import get_ogc_distances
 
         # Try to get OGC distances for targeting
@@ -259,7 +261,11 @@ class OpenRangeEngine:
 
         if ogc_distances is not None:
             ogc_carry, ogc_total = ogc_distances
-            logger.debug(f"Using OGC targeting: carry={ogc_carry:.1f}yd, total={ogc_total:.1f}yd")
+            ogc_roll = ogc_total - ogc_carry
+            logger.debug(
+                f"Using OGC distances: carry={ogc_carry:.1f}yd, "
+                f"total={ogc_total:.1f}yd, roll={ogc_roll:.1f}yd"
+            )
 
             # Run flight-only physics
             flight_trajectory, landing_state, launch_data = self.physics.simulate_flight_only(
@@ -270,12 +276,33 @@ class OpenRangeEngine:
                 sidespin_rpm=sidespin_rpm,
             )
 
-            # Run ground physics targeting OGC total distance
-            return self.physics.simulate_ground_to_target(
+            # Run ground physics targeting OGC total distance (for trajectory visualization)
+            result = self.physics.simulate_ground_to_target(
                 flight_trajectory=flight_trajectory,
                 landing_state=landing_state,
                 launch_data=launch_data,
                 target_total_yards=ogc_total,
+            )
+
+            # Override summary with OGC distances (authoritative values)
+            # Keep other physics-derived values (max_height, offline, times, bounces)
+            ogc_summary = ShotSummary(
+                carry_distance=ogc_carry,
+                total_distance=ogc_total,
+                roll_distance=ogc_roll,
+                max_height=result.summary.max_height,
+                max_height_time=result.summary.max_height_time,
+                offline_distance=result.summary.offline_distance,
+                flight_time=result.summary.flight_time,
+                total_time=result.summary.total_time,
+                bounce_count=result.summary.bounce_count,
+            )
+
+            return ShotResult(
+                trajectory=result.trajectory,
+                summary=ogc_summary,
+                launch_data=result.launch_data,
+                conditions=result.conditions,
             )
         else:
             # Fallback to pure physics simulation

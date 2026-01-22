@@ -613,9 +613,14 @@ class TestOpenRangeEngine:
         assert result.summary.carry_distance > 0
         assert len(result.trajectory) > 10
 
-    def test_update_conditions(self) -> None:
-        """Test that update_conditions affects simulation."""
+    def test_update_conditions(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that update_conditions affects simulation in pure physics mode."""
+        from gc2_connect.open_range import engine as engine_module
         from gc2_connect.open_range.engine import OpenRangeEngine
+
+        # Test with OGC disabled to verify pure physics altitude effects
+        # (With OGC, distances come from OGC which doesn't model altitude)
+        monkeypatch.setattr(engine_module, "OPENGOLFCOACH_AVAILABLE", False)
 
         engine = OpenRangeEngine()
 

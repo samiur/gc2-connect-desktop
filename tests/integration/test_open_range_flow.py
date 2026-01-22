@@ -117,8 +117,14 @@ class TestOpenRangeEngineIntegration:
 
         assert engine.surface == "Green"
 
-    def test_elevation_affects_carry_distance(self) -> None:
-        """Test that higher elevation increases carry distance."""
+    def test_elevation_affects_carry_distance(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that higher elevation increases carry distance in pure physics mode."""
+        from gc2_connect.open_range import engine as engine_module
+
+        # Test with OGC disabled to verify pure physics altitude effects
+        # (With OGC, distances come from OGC which doesn't model altitude)
+        monkeypatch.setattr(engine_module, "OPENGOLFCOACH_AVAILABLE", False)
+
         # Use manual parameters for consistent comparison (no random variance)
         engine_sea = OpenRangeEngine(conditions=Conditions(elevation_ft=0.0))
         engine_denver = OpenRangeEngine(conditions=Conditions(elevation_ft=5280.0))
