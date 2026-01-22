@@ -266,6 +266,254 @@ class PhysicsEngine:
             conditions=self.conditions,
         )
 
+    def simulate_flight_only(
+        self,
+        ball_speed_mph: float,
+        vla_deg: float,
+        hla_deg: float,
+        backspin_rpm: float,
+        sidespin_rpm: float,
+    ) -> tuple[list[TrajectoryPoint], SimulationState, LaunchData]:
+        """Run only the flight phase of simulation.
+
+        This method is used when we want to get the flight trajectory and landing
+        state, but run ground physics separately (e.g., with a target distance).
+
+        Args:
+            ball_speed_mph: Initial ball speed in mph.
+            vla_deg: Vertical launch angle in degrees.
+            hla_deg: Horizontal launch angle in degrees (+ = right).
+            backspin_rpm: Backspin in RPM.
+            sidespin_rpm: Sidespin in RPM (+ = slice/fade).
+
+        Returns:
+            Tuple of (flight_trajectory, landing_state, launch_data).
+        """
+        from gc2_connect.open_range.models import Vec3
+
+        launch_data = LaunchData(
+            ball_speed=ball_speed_mph,
+            vla=vla_deg,
+            hla=hla_deg,
+            backspin=backspin_rpm,
+            sidespin=sidespin_rpm,
+        )
+
+        # Handle edge case: zero or negative ball speed
+        if ball_speed_mph <= 0:
+            stopped_state = SimulationState(
+                pos=Vec3(x=0.0, y=0.0, z=0.0),
+                vel=Vec3(x=0.0, y=0.0, z=0.0),
+                spin_back=0.0,
+                spin_side=0.0,
+                t=0.0,
+                phase=Phase.STOPPED,
+            )
+            trajectory = [TrajectoryPoint(t=0.0, x=0.0, y=0.0, z=0.0, phase=Phase.STOPPED)]
+            return trajectory, stopped_state, launch_data
+
+        # Run flight simulation
+        flight_trajectory, landing_state = self.flight_sim.simulate_flight(
+            ball_speed_mph=ball_speed_mph,
+            vla_deg=vla_deg,
+            hla_deg=hla_deg,
+            backspin_rpm=backspin_rpm,
+            sidespin_rpm=sidespin_rpm,
+        )
+
+        return list(flight_trajectory), landing_state, launch_data
+
+    def simulate_ground_to_target(
+        self,
+        flight_trajectory: list[TrajectoryPoint],
+        landing_state: SimulationState,
+        launch_data: LaunchData,
+        target_total_yards: float,
+    ) -> ShotResult:
+        """Run ground physics calibrated to achieve a target total distance.
+
+        This method takes the result of simulate_flight_only() and runs the
+        ground phase (bounce + roll) with adjusted rolling_resistance to hit
+        the target total distance.
+
+        Args:
+            flight_trajectory: Trajectory points from flight phase.
+            landing_state: Ball state at first landing.
+            launch_data: Original launch conditions.
+            target_total_yards: Desired total distance in yards.
+
+        Returns:
+            Complete ShotResult with trajectory hitting target distance.
+        """
+        import math
+
+        # Get carry position from landing state
+        carry_x = meters_to_yards(landing_state.pos.x)
+        carry_z = meters_to_yards(landing_state.pos.z)
+        carry_distance = math.sqrt(carry_x * carry_x + carry_z * carry_z)
+        flight_time = landing_state.t
+
+        # Calculate target roll distance
+        target_roll_yards = target_total_yards - carry_distance
+
+        # Handle edge case: target is less than carry (ball should stop at carry)
+        if target_roll_yards <= 0:
+            # Ball stops at carry position
+            trajectory = list(flight_trajectory)
+            trajectory.append(
+                TrajectoryPoint(
+                    t=landing_state.t,
+                    x=carry_x,
+                    y=0.0,
+                    z=carry_z,
+                    phase=Phase.STOPPED,
+                )
+            )
+            summary = self._calculate_summary(
+                trajectory=trajectory,
+                carry_x=carry_x,
+                carry_z=carry_z,
+                flight_time=flight_time,
+                total_time=landing_state.t,
+                bounce_count=0,
+            )
+            return ShotResult(
+                trajectory=trajectory,
+                summary=summary,
+                launch_data=launch_data,
+                conditions=self.conditions,
+            )
+
+        # Convert target roll to meters for physics calculation
+        target_roll_meters = target_roll_yards / 1.09361
+
+        # Calculate horizontal landing speed (excluding vertical component)
+        landing_horizontal_speed = math.sqrt(landing_state.vel.x**2 + landing_state.vel.z**2)
+
+        # Create ground physics with targeted rolling_resistance
+        targeted_ground = self.ground.with_target_roll_distance(
+            landing_speed_ms=landing_horizontal_speed,
+            target_roll_meters=target_roll_meters,
+        )
+
+        # Run ground phase with targeted physics
+        trajectory = list(flight_trajectory)
+        state = landing_state
+        bounce_count = 0
+        iterations = 0
+        sample_counter = 0
+        sample_interval = max(1, int(0.05 / self.dt))
+
+        while state.phase != Phase.STOPPED and iterations < MAX_ITERATIONS:
+            iterations += 1
+
+            if state.phase == Phase.FLIGHT or state.phase == Phase.BOUNCE:
+                if bounce_count < MAX_BOUNCES:
+                    state = targeted_ground.bounce(state)
+                    bounce_count += 1
+
+                    if len(trajectory) < MAX_TRAJECTORY_POINTS:
+                        trajectory.append(
+                            TrajectoryPoint(
+                                t=state.t,
+                                x=meters_to_yards(state.pos.x),
+                                y=meters_to_feet(state.pos.y),
+                                z=meters_to_yards(state.pos.z),
+                                phase=Phase.BOUNCE,
+                            )
+                        )
+
+                    if targeted_ground.should_continue_bouncing(state):
+                        bounce_trajectory, bounce_landing = self.flight_sim.simulate_flight(
+                            ball_speed_mph=state.vel.mag() / 0.44704,
+                            vla_deg=self._calculate_launch_angle(state),
+                            hla_deg=self._calculate_horizontal_angle(state),
+                            backspin_rpm=state.spin_back,
+                            sidespin_rpm=state.spin_side,
+                        )
+
+                        for pt in bounce_trajectory[1:]:
+                            if len(trajectory) < MAX_TRAJECTORY_POINTS:
+                                trajectory.append(
+                                    TrajectoryPoint(
+                                        t=state.t + pt.t,
+                                        x=meters_to_yards(state.pos.x) + pt.x,
+                                        y=pt.y,
+                                        z=meters_to_yards(state.pos.z) + pt.z,
+                                        phase=Phase.FLIGHT,
+                                    )
+                                )
+
+                        state = SimulationState(
+                            pos=state.pos.add(bounce_landing.pos),
+                            vel=bounce_landing.vel,
+                            spin_back=bounce_landing.spin_back,
+                            spin_side=bounce_landing.spin_side,
+                            t=state.t + bounce_landing.t,
+                            phase=Phase.FLIGHT,
+                        )
+                    else:
+                        state = SimulationState(
+                            pos=state.pos,
+                            vel=state.vel,
+                            spin_back=state.spin_back,
+                            spin_side=state.spin_side,
+                            t=state.t,
+                            phase=Phase.ROLLING,
+                        )
+                else:
+                    state = SimulationState(
+                        pos=state.pos,
+                        vel=state.vel,
+                        spin_back=state.spin_back,
+                        spin_side=state.spin_side,
+                        t=state.t,
+                        phase=Phase.ROLLING,
+                    )
+
+            elif state.phase == Phase.ROLLING:
+                state = targeted_ground.roll_step(state, self.dt)
+                sample_counter += 1
+
+                if sample_counter >= sample_interval and len(trajectory) < MAX_TRAJECTORY_POINTS:
+                    trajectory.append(
+                        TrajectoryPoint(
+                            t=state.t,
+                            x=meters_to_yards(state.pos.x),
+                            y=meters_to_feet(state.pos.y),
+                            z=meters_to_yards(state.pos.z),
+                            phase=Phase.ROLLING,
+                        )
+                    )
+                    sample_counter = 0
+
+        if state.phase == Phase.STOPPED:
+            trajectory.append(
+                TrajectoryPoint(
+                    t=state.t,
+                    x=meters_to_yards(state.pos.x),
+                    y=0.0,
+                    z=meters_to_yards(state.pos.z),
+                    phase=Phase.STOPPED,
+                )
+            )
+
+        summary = self._calculate_summary(
+            trajectory=trajectory,
+            carry_x=carry_x,
+            carry_z=carry_z,
+            flight_time=flight_time,
+            total_time=state.t,
+            bounce_count=bounce_count,
+        )
+
+        return ShotResult(
+            trajectory=trajectory,
+            summary=summary,
+            launch_data=launch_data,
+            conditions=self.conditions,
+        )
+
     def _calculate_launch_angle(self, state: SimulationState) -> float:
         """Calculate vertical launch angle from velocity vector.
 

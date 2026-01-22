@@ -613,9 +613,14 @@ class TestOpenRangeEngine:
         assert result.summary.carry_distance > 0
         assert len(result.trajectory) > 10
 
-    def test_update_conditions(self) -> None:
-        """Test that update_conditions affects simulation."""
+    def test_update_conditions(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that update_conditions affects simulation in pure physics mode."""
+        from gc2_connect.open_range import engine as engine_module
         from gc2_connect.open_range.engine import OpenRangeEngine
+
+        # Test with OGC disabled to verify pure physics altitude effects
+        # (With OGC, distances come from OGC which doesn't model altitude)
+        monkeypatch.setattr(engine_module, "OPENGOLFCOACH_AVAILABLE", False)
 
         engine = OpenRangeEngine()
 
@@ -642,9 +647,14 @@ class TestOpenRangeEngine:
         # Denver should give more carry
         assert result_denver.summary.carry_distance > result_standard.summary.carry_distance
 
-    def test_update_surface(self) -> None:
-        """Test that update_surface affects roll behavior."""
+    def test_update_surface(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that update_surface affects roll behavior in pure physics mode."""
+        from gc2_connect.open_range import engine as engine_module
         from gc2_connect.open_range.engine import OpenRangeEngine
+
+        # Test with OGC disabled to verify pure physics surface effects
+        # (With OGC targeting, roll is calibrated to OGC total regardless of surface)
+        monkeypatch.setattr(engine_module, "OPENGOLFCOACH_AVAILABLE", False)
 
         engine = OpenRangeEngine(surface="Fairway")
 

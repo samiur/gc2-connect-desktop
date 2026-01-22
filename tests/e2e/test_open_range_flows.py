@@ -250,8 +250,16 @@ class TestOpenRangeConditions:
         assert app.open_range_engine.surface == "Rough"
 
     @pytest.mark.asyncio
-    async def test_elevation_affects_distance(self, e2e_app_factory) -> None:
-        """Test that higher elevation increases carry distance."""
+    async def test_elevation_affects_distance(
+        self, e2e_app_factory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that higher elevation increases carry distance in pure physics mode."""
+        from gc2_connect.open_range import engine as engine_module
+
+        # Test with OGC disabled to verify pure physics altitude effects
+        # (With OGC, distances come from OGC which doesn't model altitude)
+        monkeypatch.setattr(engine_module, "OPENGOLFCOACH_AVAILABLE", False)
+
         # Sea level app
         app_sea = e2e_app_factory(
             initial_settings={

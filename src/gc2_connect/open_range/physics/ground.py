@@ -214,3 +214,84 @@ class GroundPhysics:
         """
         # Check if vertical velocity is high enough to continue bouncing
         return abs(state.vel.y) >= MIN_BOUNCE_VELOCITY
+
+    def with_target_roll_distance(
+        self,
+        landing_speed_ms: float,
+        target_roll_meters: float,
+    ) -> GroundPhysics:
+        """Create a new GroundPhysics with rolling_resistance tuned for target distance.
+
+        Uses the formula: roll_distance = v² / (2 * a), where a = rolling_resistance * g
+        Solving for rolling_resistance: rolling_resistance = v² / (2 * d * g)
+
+        The calculated resistance is clamped to realistic bounds to avoid physics-breaking
+        values:
+        - Minimum: 0.02 (smoother than a very fast green)
+        - Maximum: 0.50 (rougher than heavy rough)
+
+        Args:
+            landing_speed_ms: Ball's horizontal speed at start of roll (m/s).
+            target_roll_meters: Desired roll distance in meters.
+
+        Returns:
+            New GroundPhysics instance with adjusted rolling_resistance.
+        """
+        # Calculate required rolling_resistance
+        # From d = v² / (2 * a) and a = resistance * g
+        # We get: resistance = v² / (2 * d * g)
+        required_resistance = calculate_rolling_resistance_for_target(
+            landing_speed_ms, target_roll_meters
+        )
+
+        # Create new surface with adjusted rolling_resistance
+        adjusted_surface = GroundSurface(
+            name=f"{self.surface.name}_targeted",
+            cor=self.surface.cor,
+            rolling_resistance=required_resistance,
+            friction=self.surface.friction,
+        )
+
+        # Create new GroundPhysics with adjusted surface
+        ground = GroundPhysics.__new__(GroundPhysics)
+        ground.surface = adjusted_surface
+        return ground
+
+
+def calculate_rolling_resistance_for_target(
+    landing_speed_ms: float,
+    target_roll_meters: float,
+) -> float:
+    """Calculate rolling_resistance needed to achieve target roll distance.
+
+    Uses the formula: roll_distance = v² / (2 * a), where a = rolling_resistance * g
+    Solving for rolling_resistance: rolling_resistance = v² / (2 * d * g)
+
+    The result is clamped to realistic bounds:
+    - Minimum: 0.02 (smoother than a very fast green)
+    - Maximum: 0.50 (rougher than heavy rough)
+
+    Args:
+        landing_speed_ms: Ball's horizontal speed at start of roll (m/s).
+        target_roll_meters: Desired roll distance in meters.
+
+    Returns:
+        Rolling resistance coefficient needed to achieve the target distance.
+    """
+    # Minimum bounds for realistic physics
+    MIN_RESISTANCE = 0.02
+    MAX_RESISTANCE = 0.50
+    MIN_ROLL_METERS = 0.5  # Minimum roll distance to avoid division issues
+
+    # Handle edge cases
+    if landing_speed_ms <= 0:
+        return MAX_RESISTANCE  # Ball isn't moving, use high resistance
+
+    if target_roll_meters <= MIN_ROLL_METERS:
+        return MAX_RESISTANCE  # Very short roll, use high resistance
+
+    # Calculate required resistance: resistance = v² / (2 * d * g)
+    required_resistance = (landing_speed_ms**2) / (2.0 * target_roll_meters * GRAVITY_MS2)
+
+    # Clamp to realistic bounds
+    return max(MIN_RESISTANCE, min(MAX_RESISTANCE, required_resistance))

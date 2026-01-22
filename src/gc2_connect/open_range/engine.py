@@ -20,7 +20,7 @@ import random
 from typing import TYPE_CHECKING
 
 from gc2_connect.models import GC2ShotData
-from gc2_connect.open_range.models import Conditions, ShotResult
+from gc2_connect.open_range.models import Conditions, Phase, ShotResult, TrajectoryPoint
 from gc2_connect.open_range.physics.engine import PhysicsEngine
 from gc2_connect.open_range.physics.opengolfcoach_wrapper import is_available
 
@@ -31,6 +31,90 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+
+def scale_trajectory_to_ogc(
+    trajectory: list[TrajectoryPoint],
+    ogc_carry: float,
+    ogc_total: float,
+) -> list[TrajectoryPoint]:
+    """Scale trajectory points to match OGC distances.
+
+    This function adjusts trajectory coordinates so the visualization
+    matches the OGC-reported carry and total distances. It:
+    1. Identifies the carry point (first landing/bounce)
+    2. Scales flight phase to match OGC carry
+    3. Scales ground phase to match OGC roll
+
+    Args:
+        trajectory: List of TrajectoryPoint from physics simulation.
+        ogc_carry: OGC carry distance in yards.
+        ogc_total: OGC total distance in yards.
+
+    Returns:
+        New list of TrajectoryPoint with scaled coordinates.
+    """
+    import math
+
+    if not trajectory:
+        return trajectory
+
+    # Find the carry point (first BOUNCE or ROLLING phase)
+    carry_idx = None
+    for i, pt in enumerate(trajectory):
+        if pt.phase in (Phase.BOUNCE, Phase.ROLLING, Phase.STOPPED) and pt.y <= 0.1:
+            carry_idx = i
+            break
+
+    # If no carry point found, use last flight point
+    if carry_idx is None:
+        for i in range(len(trajectory) - 1, -1, -1):
+            if trajectory[i].phase == Phase.FLIGHT:
+                carry_idx = i
+                break
+
+    if carry_idx is None or carry_idx == 0:
+        # Can't scale without a valid carry point
+        return trajectory
+
+    # Calculate physics distances at carry and final
+    carry_pt = trajectory[carry_idx]
+    final_pt = trajectory[-1]
+
+    physics_carry = math.sqrt(carry_pt.x**2 + carry_pt.z**2)
+    physics_total = math.sqrt(final_pt.x**2 + final_pt.z**2)
+
+    # Avoid division by zero
+    if physics_carry < 0.1 or physics_total < 0.1:
+        return trajectory
+
+    # Calculate scale factors
+    carry_scale = ogc_carry / physics_carry if physics_carry > 0 else 1.0
+    total_scale = ogc_total / physics_total if physics_total > 0 else 1.0
+
+    # Build scaled trajectory
+    scaled = []
+    for i, pt in enumerate(trajectory):
+        if i <= carry_idx:
+            # Flight phase: scale to match OGC carry
+            scale = carry_scale
+        else:
+            # Ground phase: interpolate scale from carry to total
+            # At carry_idx, scale = carry_scale; at end, scale = total_scale
+            progress = (i - carry_idx) / max(1, len(trajectory) - 1 - carry_idx)
+            scale = carry_scale + (total_scale - carry_scale) * progress
+
+        scaled.append(
+            TrajectoryPoint(
+                t=pt.t,
+                x=pt.x * scale,
+                y=pt.y,  # Keep height unchanged
+                z=pt.z * scale,
+                phase=pt.phase,
+            )
+        )
+
+    return scaled
 
 
 # Typical club parameters for test shots
@@ -104,6 +188,13 @@ class OpenRangeEngine:
     def simulate_shot(self, shot: GC2ShotData) -> ShotResult:
         """Simulate a shot from GC2 data.
 
+        Uses a hybrid approach when OpenGolfCoach is available:
+        1. Get OGC distances early (carry and total)
+        2. Run flight physics to get trajectory
+        3. Run ground physics calibrated to hit OGC total distance
+
+        Falls back to pure physics simulation when OGC is unavailable.
+
         Args:
             shot: GC2ShotData from launch monitor.
 
@@ -111,12 +202,13 @@ class OpenRangeEngine:
             ShotResult with trajectory, summary, and OpenGolfCoach derived values
             (when available).
         """
-        result = self.physics.simulate(
+        result = self._simulate_with_ogc_targeting(
             ball_speed_mph=shot.ball_speed,
             vla_deg=shot.launch_angle,
             hla_deg=shot.horizontal_launch_angle,
             backspin_rpm=shot.back_spin,
             sidespin_rpm=shot.side_spin,
+            gc2_shot=shot,
         )
 
         return self._enrich_with_opengolfcoach(result, shot)
@@ -131,6 +223,13 @@ class OpenRangeEngine:
     ) -> ShotResult:
         """Simulate a shot with manual parameters.
 
+        Uses a hybrid approach when OpenGolfCoach is available:
+        1. Get OGC distances early (carry and total)
+        2. Run flight physics to get trajectory
+        3. Run ground physics calibrated to hit OGC total distance
+
+        Falls back to pure physics simulation when OGC is unavailable.
+
         Args:
             ball_speed_mph: Ball speed in mph.
             vla_deg: Vertical launch angle in degrees.
@@ -142,15 +241,7 @@ class OpenRangeEngine:
             ShotResult with trajectory, summary, and OpenGolfCoach derived values
             (when available).
         """
-        result = self.physics.simulate(
-            ball_speed_mph=ball_speed_mph,
-            vla_deg=vla_deg,
-            hla_deg=hla_deg,
-            backspin_rpm=backspin_rpm,
-            sidespin_rpm=sidespin_rpm,
-        )
-
-        # Create a synthetic GC2ShotData for enrichment
+        # Create a synthetic GC2ShotData for OGC targeting and enrichment
         synthetic_shot = GC2ShotData(
             shot_id=0,
             ball_speed=ball_speed_mph,
@@ -158,6 +249,15 @@ class OpenRangeEngine:
             horizontal_launch_angle=hla_deg,
             back_spin=backspin_rpm,
             side_spin=sidespin_rpm,
+        )
+
+        result = self._simulate_with_ogc_targeting(
+            ball_speed_mph=ball_speed_mph,
+            vla_deg=vla_deg,
+            hla_deg=hla_deg,
+            backspin_rpm=backspin_rpm,
+            sidespin_rpm=sidespin_rpm,
+            gc2_shot=synthetic_shot,
         )
 
         return self._enrich_with_opengolfcoach(result, synthetic_shot)
@@ -208,6 +308,100 @@ class OpenRangeEngine:
         """
         return list(CLUB_PROFILES.keys())
 
+    def _simulate_with_ogc_targeting(
+        self,
+        ball_speed_mph: float,
+        vla_deg: float,
+        hla_deg: float,
+        backspin_rpm: float,
+        sidespin_rpm: float,
+        gc2_shot: GC2ShotData,
+    ) -> ShotResult:
+        """Simulate shot using OGC targeting when available, else pure physics.
+
+        This is the core hybrid simulation method that:
+        1. Gets OGC distances early (if available)
+        2. Runs flight physics to get trajectory and landing state
+        3. Runs ground physics for trajectory visualization
+        4. Overrides summary distances with OGC values (authoritative)
+        5. Falls back to pure physics if OGC unavailable
+
+        Args:
+            ball_speed_mph: Ball speed in mph.
+            vla_deg: Vertical launch angle in degrees.
+            hla_deg: Horizontal launch angle in degrees.
+            backspin_rpm: Backspin in RPM.
+            sidespin_rpm: Sidespin in RPM.
+            gc2_shot: GC2ShotData for OGC distance calculation.
+
+        Returns:
+            ShotResult with OGC distances in summary (or pure physics fallback).
+        """
+        from gc2_connect.open_range.models import ShotSummary
+        from gc2_connect.open_range.physics.opengolfcoach_wrapper import get_ogc_distances
+
+        # Try to get OGC distances for targeting
+        ogc_distances = get_ogc_distances(gc2_shot) if OPENGOLFCOACH_AVAILABLE else None
+
+        if ogc_distances is not None:
+            ogc_carry, ogc_total = ogc_distances
+            ogc_roll = ogc_total - ogc_carry
+            logger.debug(
+                f"Using OGC distances: carry={ogc_carry:.1f}yd, "
+                f"total={ogc_total:.1f}yd, roll={ogc_roll:.1f}yd"
+            )
+
+            # Run flight-only physics
+            flight_trajectory, landing_state, launch_data = self.physics.simulate_flight_only(
+                ball_speed_mph=ball_speed_mph,
+                vla_deg=vla_deg,
+                hla_deg=hla_deg,
+                backspin_rpm=backspin_rpm,
+                sidespin_rpm=sidespin_rpm,
+            )
+
+            # Run ground physics targeting OGC total distance (for trajectory visualization)
+            result = self.physics.simulate_ground_to_target(
+                flight_trajectory=flight_trajectory,
+                landing_state=landing_state,
+                launch_data=launch_data,
+                target_total_yards=ogc_total,
+            )
+
+            # Scale trajectory to match OGC distances
+            scaled_trajectory = scale_trajectory_to_ogc(result.trajectory, ogc_carry, ogc_total)
+
+            # Override summary with OGC distances (authoritative values)
+            # Keep other physics-derived values (max_height, offline, times, bounces)
+            ogc_summary = ShotSummary(
+                carry_distance=ogc_carry,
+                total_distance=ogc_total,
+                roll_distance=ogc_roll,
+                max_height=result.summary.max_height,
+                max_height_time=result.summary.max_height_time,
+                offline_distance=result.summary.offline_distance,
+                flight_time=result.summary.flight_time,
+                total_time=result.summary.total_time,
+                bounce_count=result.summary.bounce_count,
+            )
+
+            return ShotResult(
+                trajectory=scaled_trajectory,
+                summary=ogc_summary,
+                launch_data=result.launch_data,
+                conditions=result.conditions,
+            )
+        else:
+            # Fallback to pure physics simulation
+            logger.debug("OGC not available, using pure physics simulation")
+            return self.physics.simulate(
+                ball_speed_mph=ball_speed_mph,
+                vla_deg=vla_deg,
+                hla_deg=hla_deg,
+                backspin_rpm=backspin_rpm,
+                sidespin_rpm=sidespin_rpm,
+            )
+
     def _enrich_with_opengolfcoach(self, result: ShotResult, shot: GC2ShotData) -> ShotResult:
         """Enrich a ShotResult with OpenGolfCoach derived values.
 
@@ -229,7 +423,44 @@ class OpenRangeEngine:
         try:
             from gc2_connect.open_range.physics.enrichment import enrich_shot_result
 
-            return enrich_shot_result(result, shot)
+            enriched = enrich_shot_result(result, shot)
+            log_distance_comparison(enriched)
+            return enriched
         except Exception:
             logger.exception("Failed to enrich result with OpenGolfCoach data")
             return result
+
+
+def log_distance_comparison(result: ShotResult) -> None:
+    """Log comparison between physics engine and OpenGolfCoach distances.
+
+    This utility function logs the carry and total distances from both the
+    physics engine and OpenGolfCoach (when available) along with the percentage
+    difference. Useful for debugging and validating the physics simulation.
+
+    Args:
+        result: ShotResult with both physics summary and optional derived data.
+    """
+    if result.derived is None:
+        logger.debug("No OpenGolfCoach derived data available for comparison")
+        return
+
+    physics_carry = result.summary.carry_distance
+    physics_total = result.summary.total_distance
+
+    ogc_carry = result.derived.ogc_carry_distance
+    ogc_total = result.derived.ogc_total_distance
+
+    if ogc_carry is None or ogc_total is None:
+        logger.debug("OpenGolfCoach distances not available for comparison")
+        return
+
+    # Calculate percentage differences
+    carry_diff_pct = abs(physics_carry - ogc_carry) / ogc_carry * 100 if ogc_carry > 0 else 0.0
+    total_diff_pct = abs(physics_total - ogc_total) / ogc_total * 100 if ogc_total > 0 else 0.0
+
+    logger.debug(
+        f"Distance comparison - "
+        f"Carry: physics={physics_carry:.1f}yd, ogc={ogc_carry:.1f}yd ({carry_diff_pct:.1f}% diff) | "
+        f"Total: physics={physics_total:.1f}yd, ogc={ogc_total:.1f}yd ({total_diff_pct:.1f}% diff)"
+    )

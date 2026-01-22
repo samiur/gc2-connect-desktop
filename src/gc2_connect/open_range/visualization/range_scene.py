@@ -8,6 +8,9 @@ This module provides:
 - Target greens at common distances
 - Dark theme friendly lighting
 - Coordinate conversion utilities
+- Atmospheric fog for depth perception
+- Terrain undulations for visual interest
+- Rough area visualization with darker grass
 
 Coordinate system (Three.js/NiceGUI):
 - X: Lateral movement (+ = right)
@@ -22,18 +25,43 @@ Physics coordinate mapping:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import math
+from typing import Any
 
 from gc2_connect.open_range.models import Phase, TrajectoryPoint, Vec3
 from gc2_connect.open_range.visualization.trajectory_trace import TrajectoryTrace
 
-if TYPE_CHECKING:
-    pass
-
-
 # Range dimensions (yards)
 RANGE_LENGTH_YARDS: int = 400
 RANGE_WIDTH_YARDS: int = 100
+
+# Atmospheric fog configuration (for depth perception)
+FOG_COLOR: str = "#87ceeb"  # Match sky color for seamless blending
+FOG_NEAR: float = 100.0  # Fog starts at 100 yards (past tee area)
+FOG_FAR: float = 350.0  # Fog fully dense at 350 yards
+
+# Terrain undulation configuration (subtle height variations)
+TERRAIN_UNDULATION_AMPLITUDE: float = 0.5  # Max height variation in yards (subtle)
+TERRAIN_UNDULATION_FREQUENCY: float = 0.02  # Spatial frequency of undulations
+
+# Terrain segments for undulation visualization
+TERRAIN_SEGMENTS_X: int = 5  # Segments across width (lateral)
+TERRAIN_SEGMENTS_Z: int = 8  # Segments along length (forward)
+
+# Rough area configuration (darker grass on edges)
+ROUGH_COLOR: str = "#2d6830"  # Darker green for rough areas
+ROUGH_START_DISTANCE: float = 25.0  # Rough starts 25 yards from center
+FAIRWAY_WIDTH_YARDS: float = 50.0  # Total fairway width (25 yards each side)
+
+# Tree variation configuration for enhanced backdrop
+TREE_HEIGHT_VARIATION: float = 0.4  # 40% height variation between trees
+TREE_SPACING_VARIATION: float = 8.0  # Yards of random spacing offset
+TREE_COLOR_VARIATION: tuple[str, ...] = (
+    "#1a5a20",  # Dark green (base)
+    "#1f6625",  # Medium dark green
+    "#24722a",  # Slightly lighter
+    "#187018",  # Blue-green tint
+)
 
 # Distance markers (yards)
 DISTANCE_MARKERS: list[int] = [50, 100, 150, 200, 250, 300, 350]
@@ -120,6 +148,36 @@ def feet_to_scene(feet: float) -> float:
     return (feet / FEET_PER_YARD) * SCENE_SCALE
 
 
+def calculate_terrain_height(x_yards: float, z_yards: float) -> float:
+    """Calculate terrain height at a given position using procedural generation.
+
+    Uses sine waves to create natural-looking terrain undulations.
+    The undulations are subtle (sub-yard) to not affect gameplay visually.
+
+    Args:
+        x_yards: Forward distance in yards (along range).
+        z_yards: Lateral distance in yards (across range).
+
+    Returns:
+        Height offset in yards (can be positive or negative).
+    """
+    # Combine multiple sine waves for natural-looking terrain
+    # Primary wave along the range
+    height1 = math.sin(x_yards * TERRAIN_UNDULATION_FREQUENCY) * TERRAIN_UNDULATION_AMPLITUDE
+    # Secondary wave across the range
+    height2 = (
+        math.sin(z_yards * TERRAIN_UNDULATION_FREQUENCY * 1.5) * TERRAIN_UNDULATION_AMPLITUDE * 0.5
+    )
+    # Tertiary diagonal wave for more variation
+    height3 = (
+        math.sin((x_yards + z_yards) * TERRAIN_UNDULATION_FREQUENCY * 0.8)
+        * TERRAIN_UNDULATION_AMPLITUDE
+        * 0.3
+    )
+
+    return height1 + height2 + height3
+
+
 def trajectory_to_scene_coords(trajectory: list[TrajectoryPoint]) -> list[Vec3]:
     """Convert trajectory points to scene coordinates.
 
@@ -177,6 +235,8 @@ class RangeScene:
         self.trajectory_trace: TrajectoryTrace = TrajectoryTrace()
         # Camera behind tee (negative Z), above ground (positive Y), centered (X=0)
         self._camera_position: Vec3 = Vec3(x=0.0, y=15.0, z=-20.0)
+        # Fog is enabled by default for atmospheric depth
+        self.fog_enabled: bool = True
 
     def build(self) -> Any:
         """Create and return the 3D scene.
@@ -199,6 +259,7 @@ class RangeScene:
             with self.scene:
                 self._create_clouds()
                 self._create_backdrop()
+                self._create_rough_areas()
                 self._create_ground()
                 self._create_tee_box()
                 self._create_distance_markers()
@@ -206,6 +267,7 @@ class RangeScene:
                 self._setup_lighting()
                 self._create_ball()
             self._setup_camera()
+            self._setup_fog()
             return self.scene
         except ImportError:
             # Not in NiceGUI context - return None for testing
@@ -248,40 +310,86 @@ class RangeScene:
                         puff_x, puff_y, puff_z
                     )
 
-    def _create_ground(self) -> None:
-        """Create the driving range ground plane with mowing stripes.
+    def _create_rough_areas(self) -> None:
+        """Create rough areas (darker grass) on the sides of the fairway.
 
-        Creates a large flat green surface with alternating stripes
-        to simulate a mowed fairway pattern.
+        The rough provides visual framing and adds realism to the range.
+        These are positioned slightly below the fairway to create layering.
+        """
+        if self.scene is None:
+            return
+
+        length = yards_to_scene(RANGE_LENGTH_YARDS)
+        rough_width = yards_to_scene((RANGE_WIDTH_YARDS - FAIRWAY_WIDTH_YARDS) / 2)
+        fairway_half = yards_to_scene(FAIRWAY_WIDTH_YARDS / 2)
+
+        with self.scene:
+            from nicegui import ui
+
+            # Left rough area
+            ui.scene.box(
+                width=rough_width,
+                height=0.08,  # Slightly lower than fairway
+                depth=length,
+            ).material(ROUGH_COLOR).move(
+                -(fairway_half + rough_width / 2),  # Left side
+                -0.06,  # Below fairway level
+                length / 2,
+            )
+
+            # Right rough area
+            ui.scene.box(
+                width=rough_width,
+                height=0.08,
+                depth=length,
+            ).material(ROUGH_COLOR).move(
+                fairway_half + rough_width / 2,  # Right side
+                -0.06,
+                length / 2,
+            )
+
+    def _create_ground(self) -> None:
+        """Create the driving range ground plane with mowing stripes and undulations.
+
+        Creates a green surface with alternating stripes to simulate a mowed
+        fairway pattern. Includes subtle terrain undulations for visual interest.
         """
         if self.scene is None:
             return
 
         # Ground plane dimensions (in scene units)
         length = yards_to_scene(RANGE_LENGTH_YARDS)
-        width = yards_to_scene(RANGE_WIDTH_YARDS)
+        fairway_width = yards_to_scene(FAIRWAY_WIDTH_YARDS)
 
         with self.scene:
             from nicegui import ui
 
-            # Create striped fairway pattern
+            # Create striped fairway pattern within fairway width
             stripe_width = 10.0  # Width of each mowing stripe in yards
-            num_stripes = int(RANGE_WIDTH_YARDS / stripe_width)
+            num_stripes = int(FAIRWAY_WIDTH_YARDS / stripe_width)
 
-            for i in range(num_stripes):
-                stripe_x = -width / 2 + (i + 0.5) * yards_to_scene(stripe_width)
-                # Alternate between light and dark stripes
-                color = FAIRWAY_STRIPE_LIGHT if i % 2 == 0 else FAIRWAY_STRIPE_DARK
+            # Create terrain segments with undulations
+            segment_depth = length / TERRAIN_SEGMENTS_Z
 
-                ui.scene.box(
-                    width=yards_to_scene(stripe_width),
-                    height=0.1,
-                    depth=length,
-                ).material(color).move(
-                    stripe_x,
-                    -0.05,
-                    length / 2,
-                )
+            for seg_z in range(TERRAIN_SEGMENTS_Z):
+                z_pos = (seg_z + 0.5) * segment_depth
+
+                for i in range(num_stripes):
+                    stripe_x = -fairway_width / 2 + (i + 0.5) * yards_to_scene(stripe_width)
+                    # Calculate local undulation for this stripe
+                    local_undulation = calculate_terrain_height(z_pos, stripe_x)
+                    # Alternate between light and dark stripes
+                    color = FAIRWAY_STRIPE_LIGHT if i % 2 == 0 else FAIRWAY_STRIPE_DARK
+
+                    ui.scene.box(
+                        width=yards_to_scene(stripe_width),
+                        height=0.1,
+                        depth=segment_depth,
+                    ).material(color).move(
+                        stripe_x,
+                        -0.05 + yards_to_scene(local_undulation * 0.3),  # Subtle height offset
+                        z_pos,
+                    )
 
     def _create_tee_box(self) -> None:
         """Create the tee box area where the ball sits.
@@ -328,7 +436,7 @@ class RangeScene:
         """Create the backdrop with a forest of pine trees.
 
         Creates rows of cone-shaped trees at the far end of the range,
-        similar to the reference implementations.
+        with height and color variation for visual interest.
         """
         if self.scene is None:
             return
@@ -355,25 +463,30 @@ class RangeScene:
                 for i in range(TREES_PER_ROW):
                     # Distribute trees across the width with some randomness
                     base_x = -range_width + (i * 2 * range_width / TREES_PER_ROW)
-                    x_offset = random.uniform(-8, 8)
+                    x_offset = random.uniform(-TREE_SPACING_VARIATION, TREE_SPACING_VARIATION)
                     x = base_x + x_offset
 
-                    # Random height variation
-                    height = yards_to_scene(
-                        random.uniform(TREE_MIN_HEIGHT, TREE_MAX_HEIGHT) * height_scale
+                    # Random height variation using TREE_HEIGHT_VARIATION
+                    base_height = random.uniform(TREE_MIN_HEIGHT, TREE_MAX_HEIGHT)
+                    height_variation = 1.0 + random.uniform(
+                        -TREE_HEIGHT_VARIATION, TREE_HEIGHT_VARIATION
                     )
+                    height = yards_to_scene(base_height * height_scale * height_variation)
                     radius = yards_to_scene(TREE_BASE_RADIUS) * (height / 30)
 
                     # Random z offset within row
                     z_offset = random.uniform(-5, 5)
                     z = row_z + z_offset
 
+                    # Select random color from variation palette
+                    tree_color = random.choice(TREE_COLOR_VARIATION)
+
                     # Create pine tree as a cone
                     ui.scene.cylinder(
                         top_radius=0,  # Point at top = cone
                         bottom_radius=radius,
                         height=height,
-                    ).material(TREE_COLOR).move(x, height / 2, z)
+                    ).material(tree_color).move(x, height / 2, z)
 
     def _create_distance_markers(self) -> None:
         """Add distance markers at standard intervals.
@@ -583,3 +696,26 @@ class RangeScene:
     def camera_position(self) -> Vec3:
         """Get current camera position."""
         return self._camera_position
+
+    def _setup_fog(self) -> None:
+        """Configure atmospheric fog for depth perception.
+
+        Uses Three.js linear fog to create depth cues, making distant
+        objects fade into the sky color. This enhances the sense of
+        distance on the driving range.
+
+        The fog is applied via JavaScript since NiceGUI doesn't have
+        direct fog support.
+        """
+        if self.scene is None or not self.fog_enabled:
+            return
+
+        # Apply fog using run_method to execute JavaScript
+        # Convert fog color from hex to Three.js color format
+        fog_color_int = int(FOG_COLOR.lstrip("#"), 16)
+        fog_js = f"""
+            if (this.scene && !this.scene.fog) {{
+                this.scene.fog = new THREE.Fog({fog_color_int}, {FOG_NEAR}, {FOG_FAR});
+            }}
+        """
+        self.scene.run_method("run", fog_js)
