@@ -68,6 +68,15 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Add distance comparison logging (log_distance_comparison utility)
   - [x] Skip tests gracefully if OpenGolfCoach not installed
 
+- [x] **Prompt 21h**: Hybrid Physics Engine with OGC Distance Targeting
+  - [x] Add get_ogc_distances() for early distance retrieval
+  - [x] Add calculate_rolling_resistance_for_target() to ground.py
+  - [x] Add simulate_flight_only() and simulate_ground_to_target() to PhysicsEngine
+  - [x] Update OpenRangeEngine to use hybrid simulation (OGC targeting)
+  - [x] Calibrate ground physics to hit OGC total distance
+  - [x] Graceful fallback to pure physics when OGC unavailable
+  - [x] Write tests in test_distance_targeting.py
+
 ---
 
 ## Phase 5c: Enhanced Driving Range Visuals (PLANNED)
@@ -116,6 +125,7 @@ uv run pytest && uv run mypy src/ && uv run ruff check . && uv run ruff format -
 
 ## Key Decisions Made
 
+- **Hybrid Physics Engine (2026-01-22)**: After validation tests showed total distance divergence (physics roll was too long), implemented hybrid approach: physics engine provides trajectory for 3D visualization, OGC provides authoritative distances. Ground physics now calibrates rolling_resistance to hit OGC's total distance.
 - **OpenGolfCoach Integration (2026-01-21)**: Replacing custom shot calculations with the OpenGolfCoach library. Key benefits: shot classification, quality ranking (S+ to E), smash factor, estimated club data. Custom physics engine KEPT for trajectory visualization (OpenGolfCoach doesn't provide trajectory points).
 - **Shanktuary Golf Research (2026-01-21)**: Adopted enhanced driving range visuals (terrain, fog, trees, cameras, minimap), then minigames framework.
 - **GSPro Response Reader and Heartbeat Timer (2026-01-15)**: Background reader loop for codes 201/202/203, match state tracking, 6-second heartbeat intervals.
