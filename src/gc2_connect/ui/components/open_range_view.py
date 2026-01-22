@@ -10,6 +10,8 @@ This module provides the complete Open Range UI panel with:
 - Launch data display (ball speed, spin, angles)
 - Environmental conditions display
 - Shot classification display (shot name, rank badge with colors)
+- Camera view controls (5 presets: Behind Ball, Tee Box, Follow, Overhead, Green)
+- Minimap with shot dispersion visualization
 
 The view integrates with RangeScene and BallAnimator for visualization.
 """
@@ -25,7 +27,10 @@ from gc2_connect.open_range.models import (
     Phase,
     ShotResult,
     ShotSummary,
+    Vec3,
 )
+from gc2_connect.open_range.visualization.camera import CameraMode, get_mode_display_name
+from gc2_connect.open_range.visualization.minimap import MinimapRenderer
 
 if TYPE_CHECKING:
     from gc2_connect.open_range.visualization.ball_animation import BallAnimator
@@ -118,6 +123,9 @@ class OpenRangeView:
         self.current_phase: Phase = Phase.STOPPED
         self.last_shot_result: ShotResult | None = None
 
+        # Minimap renderer
+        self.minimap: MinimapRenderer = MinimapRenderer()
+
         # UI element references
         self._container: Any = None
         self._phase_label: Any = None
@@ -137,6 +145,15 @@ class OpenRangeView:
         self._shot_rank_label: Any = None
         self._smash_factor_label: Any = None
         self._classification_panel: Any = None
+
+        # Camera controls UI element references
+        self._camera_mode_label: Any = None
+        self._camera_mode_select: Any = None
+
+        # Minimap UI element references
+        self._minimap_container: Any = None
+        self._minimap_canvas: Any = None
+        self._minimap_toggle: Any = None
 
     def update_phase(self, phase: Phase) -> None:
         """Update the current phase and UI indicator.
@@ -344,10 +361,82 @@ class OpenRangeView:
         """
         return RANK_COLORS.get(rank, "text-gray-400")
 
+    def set_camera_mode(self, mode: CameraMode) -> None:
+        """Set the camera mode and update UI.
+
+        Args:
+            mode: The camera mode to switch to.
+        """
+        if self.animator is not None:
+            self.animator.set_camera_mode(mode)
+            self._apply_camera_to_scene()
+            self._update_camera_mode_display()
+
+    def cycle_camera_mode(self) -> None:
+        """Cycle to the next camera mode."""
+        if self.animator is not None:
+            self.animator.cycle_camera_mode()
+            self._apply_camera_to_scene()
+            self._update_camera_mode_display()
+
+    def _apply_camera_to_scene(self) -> None:
+        """Apply current camera position to scene."""
+        if self.animator is not None and self.range_scene is not None:
+            camera_pos, look_at = self.animator.get_camera_position()
+            self.range_scene.update_camera(camera_pos, look_at)
+
+    def _update_camera_mode_display(self) -> None:
+        """Update the camera mode label in UI."""
+        if self._camera_mode_label is not None and self.animator is not None:
+            mode_name = self.animator.get_camera_mode_name()
+            self._camera_mode_label.text = mode_name
+
+    def toggle_minimap(self) -> None:
+        """Toggle minimap visibility."""
+        self.minimap.set_visible(not self.minimap.visible)
+        self._update_minimap_visibility()
+
+    def _update_minimap_visibility(self) -> None:
+        """Update minimap container visibility in UI."""
+        if self._minimap_container is not None:
+            if self.minimap.visible:
+                self._minimap_container.classes(remove="hidden")
+            else:
+                self._minimap_container.classes(add="hidden")
+
+    def update_minimap_positions(
+        self,
+        ball_position: Vec3 | None = None,
+        target_position: Vec3 | None = None,
+    ) -> None:
+        """Update minimap with current ball and target positions.
+
+        Args:
+            ball_position: Current ball position, or None to keep current.
+            target_position: Target position, or None to keep current.
+        """
+        if ball_position is not None:
+            self.minimap.update_ball_position(ball_position)
+        if target_position is not None:
+            self.minimap.update_target_position(target_position)
+
+    def add_landing_marker(self, position: Vec3) -> None:
+        """Add a shot landing marker to the minimap.
+
+        Args:
+            position: Landing position in world coordinates.
+        """
+        self.minimap.add_landing_marker(position)
+
+    def clear_landing_markers(self) -> None:
+        """Clear all landing markers from the minimap."""
+        self.minimap.clear_landing_markers()
+
     async def show_shot(self, result: ShotResult) -> None:
         """Display and animate a shot.
 
         Plays the ball animation and updates all data displays.
+        Also adds landing marker to minimap for dispersion view.
 
         Args:
             result: The shot result to display.
@@ -364,6 +453,22 @@ class OpenRangeView:
 
         self.update_phase(Phase.STOPPED)
 
+        # Add landing position to minimap for dispersion visualization
+        if result.trajectory:
+            final_pos = result.trajectory[-1]
+            # Convert to scene coordinates for minimap
+            from gc2_connect.open_range.visualization.range_scene import (
+                feet_to_scene,
+                yards_to_scene,
+            )
+
+            landing_pos = Vec3(
+                x=-yards_to_scene(final_pos.z),  # Physics lateral -> Scene X
+                y=feet_to_scene(final_pos.y),
+                z=yards_to_scene(final_pos.x),  # Physics forward -> Scene Z
+            )
+            self.add_landing_marker(landing_pos)
+
     def _on_phase_change(self, phase: Phase) -> None:
         """Handle phase change callback from animator.
 
@@ -376,7 +481,8 @@ class OpenRangeView:
         """Create the Open Range view UI.
 
         Must be called within a NiceGUI context. Creates the complete
-        Open Range panel with 3D scene and data displays.
+        Open Range panel with 3D scene, data displays, camera controls,
+        and minimap.
 
         Returns:
             The container element, or None if not in NiceGUI context.
@@ -392,11 +498,18 @@ class OpenRangeView:
             with ui.row().classes("w-full gap-4") as container:
                 self._container = container
 
-                # Left: 3D scene
+                # Left: 3D scene with camera controls
                 with ui.column().classes("flex-grow"):
+                    # Camera controls row above scene
+                    self._build_camera_controls()
+
+                    # 3D scene
                     self.range_scene = RangeScene(width=800, height=500)
                     self.range_scene.build()
                     self.animator = BallAnimator()
+
+                    # Minimap overlay (positioned at bottom-right of scene)
+                    self._build_minimap()
 
                 # Right: Data panels
                 with ui.column().classes("w-72 gap-2"):
@@ -411,6 +524,77 @@ class OpenRangeView:
         except ImportError:
             # Not in NiceGUI context - return None for testing
             return None
+
+    def _build_camera_controls(self) -> None:
+        """Build the camera mode controls row."""
+        from nicegui import ui
+
+        with ui.row().classes("w-full items-center gap-4 mb-2"):
+            ui.label("Camera:").classes("text-sm text-gray-400")
+
+            # Camera mode display
+            self._camera_mode_label = ui.label("Tee Box").classes(
+                "text-sm font-semibold text-white bg-gray-700 px-2 py-1 rounded"
+            )
+
+            # Camera mode selector dropdown
+            camera_options = {mode.value: get_mode_display_name(mode) for mode in CameraMode}
+            self._camera_mode_select = ui.select(
+                options=camera_options,
+                value=CameraMode.TEE_BOX.value,
+                on_change=lambda e: self.set_camera_mode(CameraMode(e.value)),
+            ).classes("w-32")
+
+            # Cycle button
+            ui.button(
+                "Next View",
+                on_click=self.cycle_camera_mode,
+            ).classes("text-xs")
+
+            # Spacer
+            ui.space()
+
+            # Minimap toggle
+            self._minimap_toggle = ui.switch(
+                "Minimap",
+                value=True,
+                on_change=lambda _: self.toggle_minimap(),
+            ).classes("text-xs")
+
+    def _build_minimap(self) -> None:
+        """Build the minimap overlay container."""
+        from nicegui import ui
+
+        # Minimap container with styling from MinimapRenderer
+        styles = self.minimap.get_css_styles()
+        style_str = "; ".join(f"{k}: {v}" for k, v in styles.items())
+
+        with ui.element("div").style(style_str) as minimap_container:
+            self._minimap_container = minimap_container
+
+            # Canvas for minimap rendering
+            # The actual rendering happens in JavaScript via Three.js
+            # This provides the container and placeholder
+            with ui.element("div").classes("w-full h-full relative"):
+                # Placeholder showing minimap info
+                ui.label("Minimap").classes("absolute top-1 left-1 text-xs text-white/50")
+
+                # Ball position indicator (simplified 2D)
+                # Full 3D minimap rendering would require additional Three.js setup
+                with (
+                    ui.element("div")
+                    .classes("absolute w-2 h-2 bg-white rounded-full")
+                    .style("top: 50%; left: 50%; transform: translate(-50%, -50%)")
+                ):
+                    pass  # Ball marker
+
+                # Target indicator
+                with (
+                    ui.element("div")
+                    .classes("absolute w-3 h-3 border-2 border-red-500 rounded-full")
+                    .style("top: 20%; left: 50%; transform: translate(-50%, -50%)")
+                ):
+                    pass  # Target marker
 
     def _build_phase_indicator(self) -> None:
         """Build the phase indicator panel."""
@@ -527,9 +711,17 @@ class OpenRangeView:
 
         if self.animator is not None:
             self.animator.reset()
+            # Reset camera to default mode
+            self.animator.set_camera_mode(CameraMode.TEE_BOX)
 
         if self.range_scene is not None:
             self.range_scene.reset_ball()
+            # Reset camera position
+            self._apply_camera_to_scene()
+
+        # Reset minimap
+        self.minimap.clear_landing_markers()
+        self.minimap.update_ball_position(Vec3(x=0.0, y=0.0, z=0.0))
 
         # Reset UI labels
         if self._phase_label is not None:
@@ -556,6 +748,9 @@ class OpenRangeView:
             self._shot_rank_label.classes(add="text-gray-400")
         if self._smash_factor_label is not None:
             self._smash_factor_label.text = "--"
+
+        # Reset camera mode display
+        self._update_camera_mode_display()
 
     def hide(self) -> None:
         """Hide the Open Range view."""

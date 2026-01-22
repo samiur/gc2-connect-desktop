@@ -5,7 +5,7 @@
 This module provides:
 - BallAnimator: Animates ball along trajectory
 - Phase indicators with color coding
-- Camera following utilities
+- Camera following utilities with multiple camera modes
 - Position interpolation
 
 Animation phases:
@@ -13,6 +13,13 @@ Animation phases:
 - BOUNCE: Ground contact (orange color)
 - ROLLING: Ball rolling (blue color)
 - STOPPED: Ball at rest (gray color)
+
+Camera modes:
+- BEHIND_BALL: Low angle behind the ball
+- TEE_BOX: Eye-level view from behind tee
+- FOLLOW: Dynamic camera following ball during flight
+- OVERHEAD: Bird's eye view for dispersion
+- GREEN: View from landing area looking back
 """
 
 from __future__ import annotations
@@ -23,6 +30,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from gc2_connect.open_range.models import Phase, TrajectoryPoint, Vec3
+from gc2_connect.open_range.visualization.camera import (
+    FOLLOW_CAMERA_DISTANCE,
+    FOLLOW_CAMERA_HEIGHT,
+    FOLLOW_CAMERA_LATERAL,
+    CameraController,
+    CameraMode,
+)
 
 if TYPE_CHECKING:
     from gc2_connect.open_range.models import ShotResult
@@ -37,12 +51,14 @@ PHASE_COLORS: dict[Phase, str] = {
     Phase.STOPPED: "#888888",  # Gray - at rest
 }
 
-# Camera configuration
-CAMERA_FOLLOW_DISTANCE: float = 40.0  # Yards behind ball
-CAMERA_HEIGHT_OFFSET: float = 20.0  # Yards above ground
-CAMERA_LATERAL_OFFSET: float = 10.0  # Yards to side for better view
+# Camera timing configuration
 CAMERA_FOLLOW_DELAY: float = 0.5  # Seconds to wait before camera starts following
 CAMERA_END_DELAY: float = 2.0  # Seconds to show final position before resetting
+
+# Legacy camera constants (re-exported from camera module for backwards compatibility)
+CAMERA_FOLLOW_DISTANCE: float = FOLLOW_CAMERA_DISTANCE
+CAMERA_HEIGHT_OFFSET: float = FOLLOW_CAMERA_HEIGHT
+CAMERA_LATERAL_OFFSET: float = FOLLOW_CAMERA_LATERAL
 
 # Animation configuration
 DEFAULT_TARGET_FPS: int = 60
@@ -118,13 +134,17 @@ class BallAnimator:
     """Animates ball along trajectory path.
 
     Handles smooth animation of the golf ball from launch to rest,
-    with phase transitions and optional camera following.
+    with phase transitions and configurable camera modes.
 
     The animator interpolates between trajectory points to create
     smooth 60fps animation from the sparse trajectory data.
 
+    Camera behavior is controlled by the CameraController, which
+    supports multiple view modes (tee box, follow, overhead, etc.).
+
     Example:
         animator = BallAnimator()
+        animator.set_camera_mode(CameraMode.FOLLOW)
         frames = animator.calculate_animation_frames(trajectory)
         await animator.animate_shot(result, scene)
     """
@@ -136,6 +156,55 @@ class BallAnimator:
         self.is_animating: bool = False
         self.current_phase: Phase = Phase.STOPPED
         self._animation_task: asyncio.Task[None] | None = None
+        self._camera_controller: CameraController = CameraController()
+
+    @property
+    def camera_mode(self) -> CameraMode:
+        """Get current camera mode."""
+        return self._camera_controller.current_mode
+
+    def set_camera_mode(self, mode: CameraMode) -> None:
+        """Set the camera mode.
+
+        Args:
+            mode: The camera mode to switch to.
+        """
+        self._camera_controller.set_mode(mode)
+
+    def cycle_camera_mode(self) -> CameraMode:
+        """Cycle to the next camera mode.
+
+        Returns:
+            The new camera mode after cycling.
+        """
+        self._camera_controller.cycle_mode()
+        return self._camera_controller.current_mode
+
+    def get_camera_mode_name(self) -> str:
+        """Get the display name of the current camera mode.
+
+        Returns:
+            Human-readable name of current mode.
+        """
+        return self._camera_controller.get_current_preset_name()
+
+    def get_camera_position(
+        self,
+        ball_position: Vec3 | None = None,
+    ) -> tuple[Vec3, Vec3]:
+        """Get the current camera position and look-at target.
+
+        For dynamic modes (FOLLOW), the ball position is used to
+        calculate the camera position. For static modes, the preset
+        position is returned.
+
+        Args:
+            ball_position: Current ball position (used for dynamic modes).
+
+        Returns:
+            Tuple of (camera_position, look_at_position).
+        """
+        return self._camera_controller.get_camera_position(ball_position)
 
     def calculate_animation_frames(
         self,
@@ -260,13 +329,13 @@ class BallAnimator:
         draw_trace: bool = True,
         trace_sample_interval: int = 3,
     ) -> None:
-        """Animate ball along trajectory with cinematic camera and trace.
+        """Animate ball along trajectory with configurable camera and trace.
 
-        Camera behavior:
-        1. Start at tee box view, hold for CAMERA_FOLLOW_DELAY seconds
-        2. Smoothly follow ball along range (no rotation)
-        3. After ball stops, hold final position for CAMERA_END_DELAY seconds
-        4. Reset camera to tee box view
+        Camera behavior depends on the current camera mode:
+        - TEE_BOX/BEHIND_BALL: Static view from behind the tee
+        - FOLLOW: Tracks ball during flight, returns to tee after
+        - OVERHEAD: Bird's eye view, good for dispersion
+        - GREEN: View from landing area looking back
 
         Trace behavior:
         - Trace is drawn progressively as ball moves
@@ -304,10 +373,10 @@ class BallAnimator:
         # Calculate when camera should start following (in animation time)
         follow_start_time = CAMERA_FOLLOW_DELAY / speed
 
-        # Set initial tee box camera
+        # Set initial camera position based on current mode
         if scene is not None:
-            tee_cam_pos, tee_cam_look = get_tee_box_camera()
-            scene.update_camera(tee_cam_pos, tee_cam_look)
+            initial_cam_pos, initial_cam_look = self._camera_controller.get_camera_position()
+            scene.update_camera(initial_cam_pos, initial_cam_look)
 
         last_phase = Phase.FLIGHT
 
@@ -352,12 +421,26 @@ class BallAnimator:
                 if draw_trace and i % trace_sample_interval == 0:
                     scene.add_trajectory_point(scene_pos, current_phase)
 
-                # Camera behavior: stay at tee, then follow
-                if frame_time >= follow_start_time:
-                    # Follow the ball
-                    camera_pos, look_at = calculate_follow_camera(scene_pos.z, scene_pos.z)
+                # Update camera based on current mode
+                # For FOLLOW mode, camera tracks ball after initial delay
+                # For other modes, camera stays static
+                current_mode = self._camera_controller.current_mode
+                if current_mode == CameraMode.FOLLOW and frame_time >= follow_start_time:
+                    camera_pos, look_at = self._camera_controller.get_camera_position(
+                        ball_position=scene_pos
+                    )
                     scene.update_camera(camera_pos, look_at)
-                # Before follow_start_time, camera stays at tee box position
+                elif current_mode in (CameraMode.TEE_BOX, CameraMode.BEHIND_BALL):
+                    # Static modes - no update needed during animation
+                    pass
+                elif current_mode == CameraMode.OVERHEAD:
+                    # For overhead, optionally track ball (center on ball)
+                    camera_pos, look_at = self._camera_controller.get_camera_position(
+                        ball_position=scene_pos
+                    )
+                    # Only update occasionally for overhead to avoid jitter
+                    if i % 10 == 0:
+                        scene.update_camera(camera_pos, look_at)
 
             # Wait for next frame
             await asyncio.sleep(frame_delay)
@@ -366,9 +449,9 @@ class BallAnimator:
         if scene is not None and self.is_animating:
             await asyncio.sleep(CAMERA_END_DELAY / speed)
 
-            # Reset camera to tee box view
-            tee_cam_pos, tee_cam_look = get_tee_box_camera()
-            scene.update_camera(tee_cam_pos, tee_cam_look)
+            # Reset camera to initial mode position
+            reset_cam_pos, reset_cam_look = self._camera_controller.get_camera_position()
+            scene.update_camera(reset_cam_pos, reset_cam_look)
 
         self.is_animating = False
         self.current_phase = Phase.STOPPED
