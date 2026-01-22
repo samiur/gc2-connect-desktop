@@ -229,7 +229,44 @@ class OpenRangeEngine:
         try:
             from gc2_connect.open_range.physics.enrichment import enrich_shot_result
 
-            return enrich_shot_result(result, shot)
+            enriched = enrich_shot_result(result, shot)
+            log_distance_comparison(enriched)
+            return enriched
         except Exception:
             logger.exception("Failed to enrich result with OpenGolfCoach data")
             return result
+
+
+def log_distance_comparison(result: ShotResult) -> None:
+    """Log comparison between physics engine and OpenGolfCoach distances.
+
+    This utility function logs the carry and total distances from both the
+    physics engine and OpenGolfCoach (when available) along with the percentage
+    difference. Useful for debugging and validating the physics simulation.
+
+    Args:
+        result: ShotResult with both physics summary and optional derived data.
+    """
+    if result.derived is None:
+        logger.debug("No OpenGolfCoach derived data available for comparison")
+        return
+
+    physics_carry = result.summary.carry_distance
+    physics_total = result.summary.total_distance
+
+    ogc_carry = result.derived.ogc_carry_distance
+    ogc_total = result.derived.ogc_total_distance
+
+    if ogc_carry is None or ogc_total is None:
+        logger.debug("OpenGolfCoach distances not available for comparison")
+        return
+
+    # Calculate percentage differences
+    carry_diff_pct = abs(physics_carry - ogc_carry) / ogc_carry * 100 if ogc_carry > 0 else 0.0
+    total_diff_pct = abs(physics_total - ogc_total) / ogc_total * 100 if ogc_total > 0 else 0.0
+
+    logger.debug(
+        f"Distance comparison - "
+        f"Carry: physics={physics_carry:.1f}yd, ogc={ogc_carry:.1f}yd ({carry_diff_pct:.1f}% diff) | "
+        f"Total: physics={physics_total:.1f}yd, ogc={ogc_total:.1f}yd ({total_diff_pct:.1f}% diff)"
+    )
