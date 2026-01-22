@@ -55,12 +55,12 @@ Target Release: v1.1.0 (with Open Range)
   - [x] Graceful fallback if OpenGolfCoach unavailable
   - [x] Keep trajectory from custom physics engine (OGC doesn't provide trajectory)
 
-- [ ] **Prompt 21f**: Update Open Range UI for Shot Classification ← NEXT
-  - [ ] Write integration tests for classification UI
-  - [ ] Add shot classification panel (shot_name, shot_rank)
-  - [ ] Add rank badge with color coding (S+=gold, S=silver, A=green, etc.)
-  - [ ] Update _update_data_display() to show classification
-  - [ ] Handle missing derived data gracefully
+- [x] **Prompt 21f**: Update Open Range UI for Shot Classification
+  - [x] Write integration tests for classification UI
+  - [x] Add shot classification panel (shot_name, shot_rank)
+  - [x] Add rank badge with color coding (S+=gold, S=silver, A=green, etc.)
+  - [x] Update _update_data_display() to show classification
+  - [x] Handle missing derived data gracefully
 
 - [ ] **Prompt 21g**: Validate OpenGolfCoach vs Physics Engine
   - [ ] Write comparison tests (driver, 7-iron, wedge shots)

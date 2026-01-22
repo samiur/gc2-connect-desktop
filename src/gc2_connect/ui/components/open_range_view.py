@@ -9,6 +9,7 @@ This module provides the complete Open Range UI panel with:
 - Shot data display (carry, total, offline, height)
 - Launch data display (ball speed, spin, angles)
 - Environmental conditions display
+- Shot classification display (shot name, rank badge with colors)
 
 The view integrates with RangeScene and BallAnimator for visualization.
 """
@@ -19,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from gc2_connect.open_range.models import (
     Conditions,
+    DerivedShotData,
     LaunchData,
     Phase,
     ShotResult,
@@ -36,6 +38,18 @@ PHASE_COLORS: dict[Phase, str] = {
     Phase.BOUNCE: "text-orange-400",
     Phase.ROLLING: "text-blue-400",
     Phase.STOPPED: "text-gray-400",
+}
+
+# Rank colors as Tailwind CSS classes
+# S+=gold, S=silver, A=green, B=blue, C=purple, D=orange, E=red
+RANK_COLORS: dict[str, str] = {
+    "S+": "text-yellow-400",
+    "S": "text-gray-300",
+    "A": "text-green-400",
+    "B": "text-blue-400",
+    "C": "text-purple-400",
+    "D": "text-orange-400",
+    "E": "text-red-400",
 }
 
 
@@ -118,6 +132,12 @@ class OpenRangeView:
         self._elevation_label: Any = None
         self._wind_label: Any = None
 
+        # Shot classification UI element references
+        self._shot_name_label: Any = None
+        self._shot_rank_label: Any = None
+        self._smash_factor_label: Any = None
+        self._classification_panel: Any = None
+
     def update_phase(self, phase: Phase) -> None:
         """Update the current phase and UI indicator.
 
@@ -170,6 +190,46 @@ class OpenRangeView:
             self._elevation_label.text = f"{conditions.elevation_ft:.0f} ft"
         if self._wind_label is not None:
             self._wind_label.text = f"{conditions.wind_speed_mph:.0f} mph"
+
+        # Update shot classification (from OpenGolfCoach)
+        self._update_shot_classification(result.derived)
+
+    def _update_shot_classification(self, derived: DerivedShotData | None) -> None:
+        """Update shot classification display with derived data.
+
+        Args:
+            derived: The derived shot data from OpenGolfCoach, or None.
+        """
+        if derived is None:
+            # No derived data - show placeholders
+            if self._shot_name_label is not None:
+                self._shot_name_label.text = "--"
+            if self._shot_rank_label is not None:
+                self._shot_rank_label.text = "--"
+                # Reset to default color
+                for color in RANK_COLORS.values():
+                    self._shot_rank_label.classes(remove=color)
+                self._shot_rank_label.classes(add="text-gray-400")
+            if self._smash_factor_label is not None:
+                self._smash_factor_label.text = "--"
+            return
+
+        # Update shot name
+        if self._shot_name_label is not None:
+            self._shot_name_label.text = derived.shot_name
+
+        # Update shot rank with color coding
+        if self._shot_rank_label is not None:
+            self._shot_rank_label.text = derived.shot_rank
+            # Update rank color
+            for color in RANK_COLORS.values():
+                self._shot_rank_label.classes(remove=color)
+            rank_color = self.get_rank_color(derived.shot_rank)
+            self._shot_rank_label.classes(add=rank_color)
+
+        # Update smash factor
+        if self._smash_factor_label is not None:
+            self._smash_factor_label.text = self.format_smash_factor(derived.smash_factor)
 
     def format_shot_summary(self, summary: ShotSummary) -> dict[str, str]:
         """Format shot summary data for display.
@@ -224,6 +284,65 @@ class OpenRangeView:
             "wind_speed_mph": f"{conditions.wind_speed_mph:.0f} mph",
             "wind_dir_deg": f"{conditions.wind_dir_deg:.0f}°",
         }
+
+    def format_shot_classification(self, derived: DerivedShotData | None) -> dict[str, str] | None:
+        """Format shot classification data for display.
+
+        Args:
+            derived: The derived shot data from OpenGolfCoach, or None.
+
+        Returns:
+            Dictionary of formatted values, or None if no derived data.
+        """
+        if derived is None:
+            return None
+
+        return {
+            "shot_name": derived.shot_name,
+            "shot_rank": derived.shot_rank,
+        }
+
+    def format_smash_factor(self, smash_factor: float | None) -> str:
+        """Format smash factor for display.
+
+        Args:
+            smash_factor: The smash factor value, or None.
+
+        Returns:
+            Formatted string with smash factor or placeholder.
+        """
+        if smash_factor is None:
+            return "--"
+        return f"{smash_factor:.2f}"
+
+    def format_derived_summary(self, derived: DerivedShotData | None) -> dict[str, str] | None:
+        """Format full derived data summary for display.
+
+        Args:
+            derived: The derived shot data from OpenGolfCoach, or None.
+
+        Returns:
+            Dictionary of formatted values, or None if no derived data.
+        """
+        if derived is None:
+            return None
+
+        return {
+            "shot_name": derived.shot_name,
+            "shot_rank": derived.shot_rank,
+            "smash_factor": self.format_smash_factor(derived.smash_factor),
+        }
+
+    def get_rank_color(self, rank: str) -> str:
+        """Get the Tailwind color class for a rank.
+
+        Args:
+            rank: The rank string (S+, S, A, B, C, D, E).
+
+        Returns:
+            Tailwind CSS color class for the rank.
+        """
+        return RANK_COLORS.get(rank, "text-gray-400")
 
     async def show_shot(self, result: ShotResult) -> None:
         """Display and animate a shot.
@@ -282,6 +401,7 @@ class OpenRangeView:
                 # Right: Data panels
                 with ui.column().classes("w-72 gap-2"):
                     self._build_phase_indicator()
+                    self._build_shot_classification_panel()
                     self._build_shot_data_panel()
                     self._build_launch_data_panel()
                     self._build_conditions_panel()
@@ -299,6 +419,32 @@ class OpenRangeView:
         with ui.card().classes("w-full"):
             ui.label("Phase").classes("text-sm text-gray-400")
             self._phase_label = ui.label("Ready").classes("text-2xl font-bold text-gray-400")
+
+    def _build_shot_classification_panel(self) -> None:
+        """Build the shot classification panel with rank badge."""
+        from nicegui import ui
+
+        with ui.card().classes("w-full") as panel:
+            self._classification_panel = panel
+            ui.label("Shot Classification").classes("text-sm text-gray-400 mb-2")
+
+            with ui.row().classes("items-center gap-3 w-full"):
+                # Shot name (main classification)
+                with ui.column().classes("gap-0 flex-grow"):
+                    ui.label("Shot Type").classes("text-xs text-gray-500")
+                    self._shot_name_label = ui.label("--").classes("text-lg font-semibold")
+
+                # Rank badge with color coding
+                with ui.column().classes("gap-0 items-center"):
+                    ui.label("Rank").classes("text-xs text-gray-500")
+                    self._shot_rank_label = ui.label("--").classes(
+                        "text-xl font-bold text-gray-400"
+                    )
+
+            # Smash factor row
+            with ui.row().classes("mt-2 w-full"), ui.column().classes("gap-0"):
+                ui.label("Smash Factor").classes("text-xs text-gray-500")
+                self._smash_factor_label = ui.label("--").classes("text-md font-semibold")
 
     def _build_shot_data_panel(self) -> None:
         """Build the shot result data panel."""
@@ -399,6 +545,17 @@ class OpenRangeView:
             self._offline_label.text = "-- yds"
         if self._height_label is not None:
             self._height_label.text = "-- ft"
+
+        # Reset classification labels
+        if self._shot_name_label is not None:
+            self._shot_name_label.text = "--"
+        if self._shot_rank_label is not None:
+            self._shot_rank_label.text = "--"
+            for color in RANK_COLORS.values():
+                self._shot_rank_label.classes(remove=color)
+            self._shot_rank_label.classes(add="text-gray-400")
+        if self._smash_factor_label is not None:
+            self._smash_factor_label.text = "--"
 
     def hide(self) -> None:
         """Hide the Open Range view."""
