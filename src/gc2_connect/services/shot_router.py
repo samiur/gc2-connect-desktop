@@ -1,10 +1,10 @@
-# ABOUTME: Routes shot data to GSPro or Open Range based on current mode.
+# ABOUTME: Routes shot data to GSPro, Open Range, or Minigames based on current mode.
 # ABOUTME: Handles mode switching and destination management.
 """Shot routing service for GC2 Connect.
 
 This module provides:
-- AppMode: Enum for application modes (GSPRO, OPEN_RANGE)
-- ShotRouter: Routes shots between GSPro and Open Range
+- AppMode: Enum for application modes (GSPRO, OPEN_RANGE, MINIGAME)
+- ShotRouter: Routes shots between GSPro, Open Range, and Minigames
 
 The ShotRouter acts as a central dispatcher for shot data from the GC2
 launch monitor, directing shots to the appropriate destination based
@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from gc2_connect.gspro.client import GSProClient
+    from gc2_connect.minigames.manager import GameManager
+    from gc2_connect.minigames.models import GameResult
     from gc2_connect.models import GC2ShotData
     from gc2_connect.open_range.engine import OpenRangeEngine
     from gc2_connect.open_range.models import ShotResult
@@ -33,18 +35,20 @@ class AppMode(str, Enum):
     Determines where shot data is routed:
     - GSPRO: Shots are sent to GSPro golf simulator
     - OPEN_RANGE: Shots are simulated locally in Open Range
+    - MINIGAME: Shots are processed by the active minigame
     """
 
     GSPRO = "gspro"
     OPEN_RANGE = "open_range"
+    MINIGAME = "minigame"
 
 
 class ShotRouter:
-    """Routes shots between GSPro and Open Range modes.
+    """Routes shots between GSPro, Open Range, and Minigame modes.
 
     The router maintains the current application mode and directs
     shot data to the appropriate destination. It supports:
-    - Mode switching between GSPro and Open Range
+    - Mode switching between GSPro, Open Range, and Minigame
     - Callbacks for mode changes and shot results
     - Graceful handling of missing clients/engines
 
@@ -52,6 +56,7 @@ class ShotRouter:
         router = ShotRouter()
         router.set_gspro_client(gspro_client)
         router.set_open_range_engine(open_range_engine)
+        router.set_game_manager(game_manager)
         router.on_mode_change(handle_mode_change)
         router.on_shot_result(handle_open_range_result)
 
@@ -63,8 +68,10 @@ class ShotRouter:
         self._mode = AppMode.GSPRO
         self._gspro_client: GSProClient | None = None
         self._open_range_engine: OpenRangeEngine | None = None
+        self._game_manager: GameManager | None = None
         self._mode_change_callback: Callable[[AppMode], Awaitable[None]] | None = None
         self._shot_result_callback: Callable[[ShotResult], Awaitable[None]] | None = None
+        self._game_result_callback: Callable[[GameResult], Awaitable[None]] | None = None
 
     @property
     def mode(self) -> AppMode:
@@ -109,6 +116,14 @@ class ShotRouter:
         """
         self._open_range_engine = engine
 
+    def set_game_manager(self, manager: GameManager) -> None:
+        """Set the game manager for minigame shot routing.
+
+        Args:
+            manager: The GameManager instance.
+        """
+        self._game_manager = manager
+
     def on_mode_change(self, callback: Callable[[AppMode], Awaitable[None]]) -> None:
         """Register a callback for mode changes.
 
@@ -131,11 +146,23 @@ class ShotRouter:
         """
         self._shot_result_callback = callback
 
+    def on_game_result(self, callback: Callable[[GameResult], Awaitable[None]]) -> None:
+        """Register a callback for minigame results.
+
+        The callback is invoked after a shot is processed in a minigame,
+        receiving the GameResult with points and outcome.
+
+        Args:
+            callback: Async function to call with game results.
+        """
+        self._game_result_callback = callback
+
     async def route_shot(self, shot: GC2ShotData) -> None:
         """Route a shot to the appropriate destination.
 
         In GSPRO mode, the shot is sent to the GSPro client.
         In OPEN_RANGE mode, the shot is simulated locally.
+        In MINIGAME mode, the shot is processed by the active minigame.
 
         Args:
             shot: The GC2 shot data to route.
@@ -145,8 +172,10 @@ class ShotRouter:
         """
         if self._mode == AppMode.GSPRO:
             await self._route_to_gspro(shot)
-        else:
+        elif self._mode == AppMode.OPEN_RANGE:
             await self._route_to_open_range(shot)
+        else:
+            await self._route_to_minigame(shot)
 
     async def _route_to_gspro(self, shot: GC2ShotData) -> None:
         """Send shot to GSPro.
@@ -180,3 +209,21 @@ class ShotRouter:
 
         if self._shot_result_callback:
             await self._shot_result_callback(result)
+
+    async def _route_to_minigame(self, shot: GC2ShotData) -> None:
+        """Process shot in active minigame.
+
+        Args:
+            shot: The GC2 shot data to process.
+
+        Raises:
+            RuntimeError: If game manager is not configured.
+        """
+        if not self._game_manager:
+            raise RuntimeError("Game manager not configured")
+
+        logger.debug(f"Routing shot {shot.shot_id} to Minigame")
+        result = await self._game_manager.process_shot(shot)
+
+        if result is not None and self._game_result_callback:
+            await self._game_result_callback(result)
