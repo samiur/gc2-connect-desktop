@@ -56,11 +56,14 @@ src/gc2_connect/
 │   ├── history.py       # Shot history manager
 │   └── export.py        # CSV export
 ├── config/              # Settings management
-└── minigames/           # (PLANNED) Minigames framework
-    ├── base.py          # BaseMinigame, GameManager
-    ├── putting_green.py # Putting practice
-    ├── target_range.py  # Target scoring
-    └── golf_darts.py    # Darts with VLA/HLA mapping
+└── minigames/           # Minigames framework (base architecture complete)
+    ├── __init__.py      # Package exports
+    ├── models.py        # GameType, GameState, GameConfig, GameScore, GameResult
+    ├── base.py          # BaseMinigame abstract class
+    ├── manager.py       # GameManager for lifecycle management
+    ├── putting_green.py # (PLANNED) Putting practice
+    ├── target_range.py  # (PLANNED) Target scoring
+    └── golf_darts.py    # (PLANNED) Darts with VLA/HLA mapping
 
 tools/
 └── mock_gspro_server.py # Testing utility
@@ -142,9 +145,7 @@ uv run python tools/mock_gspro_server.py --host 0.0.0.0 --port 921
 
 ## Upcoming Features (see plan.md/todo.md)
 
-- **OpenGolfCoach Integration** (Phase 5b): Shot classification, ranking (S+ to E), smash factor
-- **Enhanced Visuals** (Phase 5c): Procedural terrain, fog, trees, multiple camera views, minimap
-- **Minigames** (Phase 5d): Putting Green, Target Range, Golf Darts (301/501/Cricket)
+- **Minigames** (Phase 5d): Base architecture complete. Remaining: Putting Green, Target Range, Golf Darts (301/501/Cricket)
 
 ## Related Documentation
 
