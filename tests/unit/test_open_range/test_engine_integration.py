@@ -404,6 +404,7 @@ class TestAPIBackwardsCompatibility:
 
         # Existing code would access these fields
         assert result.summary.carry_distance > 0
-        assert result.summary.total_distance > result.summary.carry_distance
+        # With OGC targeting, total can equal carry when OGC predicts minimal roll
+        assert result.summary.total_distance >= result.summary.carry_distance
         assert len(result.trajectory) > 0
         assert result.launch_data.ball_speed == 161.0

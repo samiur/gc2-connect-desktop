@@ -191,3 +191,27 @@ def calculate_shot_from_gc2(shot: GC2ShotData) -> OpenGolfCoachResult:
     """
     input_data = OpenGolfCoachInput.from_gc2_shot(shot)
     return calculate_shot(input_data)
+
+
+def get_ogc_distances(shot: GC2ShotData) -> tuple[float, float] | None:
+    """Get OGC carry and total distances for early physics targeting.
+
+    This lightweight function gets just the distances from OpenGolfCoach,
+    without the full classification and club data. Used to get target
+    distances BEFORE running ground physics.
+
+    Args:
+        shot: GC2 shot data from launch monitor.
+
+    Returns:
+        Tuple of (carry_distance_yards, total_distance_yards), or None
+        if OpenGolfCoach is unavailable or calculation fails.
+    """
+    if not _OPENGOLFCOACH_AVAILABLE:
+        return None
+
+    try:
+        result = calculate_shot_from_gc2(shot)
+        return (result.carry_distance_yards, result.total_distance_yards)
+    except Exception:
+        return None

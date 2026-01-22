@@ -104,6 +104,13 @@ class OpenRangeEngine:
     def simulate_shot(self, shot: GC2ShotData) -> ShotResult:
         """Simulate a shot from GC2 data.
 
+        Uses a hybrid approach when OpenGolfCoach is available:
+        1. Get OGC distances early (carry and total)
+        2. Run flight physics to get trajectory
+        3. Run ground physics calibrated to hit OGC total distance
+
+        Falls back to pure physics simulation when OGC is unavailable.
+
         Args:
             shot: GC2ShotData from launch monitor.
 
@@ -111,12 +118,13 @@ class OpenRangeEngine:
             ShotResult with trajectory, summary, and OpenGolfCoach derived values
             (when available).
         """
-        result = self.physics.simulate(
+        result = self._simulate_with_ogc_targeting(
             ball_speed_mph=shot.ball_speed,
             vla_deg=shot.launch_angle,
             hla_deg=shot.horizontal_launch_angle,
             backspin_rpm=shot.back_spin,
             sidespin_rpm=shot.side_spin,
+            gc2_shot=shot,
         )
 
         return self._enrich_with_opengolfcoach(result, shot)
@@ -131,6 +139,13 @@ class OpenRangeEngine:
     ) -> ShotResult:
         """Simulate a shot with manual parameters.
 
+        Uses a hybrid approach when OpenGolfCoach is available:
+        1. Get OGC distances early (carry and total)
+        2. Run flight physics to get trajectory
+        3. Run ground physics calibrated to hit OGC total distance
+
+        Falls back to pure physics simulation when OGC is unavailable.
+
         Args:
             ball_speed_mph: Ball speed in mph.
             vla_deg: Vertical launch angle in degrees.
@@ -142,15 +157,7 @@ class OpenRangeEngine:
             ShotResult with trajectory, summary, and OpenGolfCoach derived values
             (when available).
         """
-        result = self.physics.simulate(
-            ball_speed_mph=ball_speed_mph,
-            vla_deg=vla_deg,
-            hla_deg=hla_deg,
-            backspin_rpm=backspin_rpm,
-            sidespin_rpm=sidespin_rpm,
-        )
-
-        # Create a synthetic GC2ShotData for enrichment
+        # Create a synthetic GC2ShotData for OGC targeting and enrichment
         synthetic_shot = GC2ShotData(
             shot_id=0,
             ball_speed=ball_speed_mph,
@@ -158,6 +165,15 @@ class OpenRangeEngine:
             horizontal_launch_angle=hla_deg,
             back_spin=backspin_rpm,
             side_spin=sidespin_rpm,
+        )
+
+        result = self._simulate_with_ogc_targeting(
+            ball_speed_mph=ball_speed_mph,
+            vla_deg=vla_deg,
+            hla_deg=hla_deg,
+            backspin_rpm=backspin_rpm,
+            sidespin_rpm=sidespin_rpm,
+            gc2_shot=synthetic_shot,
         )
 
         return self._enrich_with_opengolfcoach(result, synthetic_shot)
@@ -207,6 +223,70 @@ class OpenRangeEngine:
             List of club names that can be used with simulate_test_shot.
         """
         return list(CLUB_PROFILES.keys())
+
+    def _simulate_with_ogc_targeting(
+        self,
+        ball_speed_mph: float,
+        vla_deg: float,
+        hla_deg: float,
+        backspin_rpm: float,
+        sidespin_rpm: float,
+        gc2_shot: GC2ShotData,
+    ) -> ShotResult:
+        """Simulate shot using OGC targeting when available, else pure physics.
+
+        This is the core hybrid simulation method that:
+        1. Gets OGC distances early (if available)
+        2. Runs flight physics to get trajectory and landing state
+        3. Runs ground physics calibrated to hit OGC total distance
+        4. Falls back to pure physics if OGC unavailable
+
+        Args:
+            ball_speed_mph: Ball speed in mph.
+            vla_deg: Vertical launch angle in degrees.
+            hla_deg: Horizontal launch angle in degrees.
+            backspin_rpm: Backspin in RPM.
+            sidespin_rpm: Sidespin in RPM.
+            gc2_shot: GC2ShotData for OGC distance calculation.
+
+        Returns:
+            ShotResult with trajectory hitting OGC target (or pure physics fallback).
+        """
+        from gc2_connect.open_range.physics.opengolfcoach_wrapper import get_ogc_distances
+
+        # Try to get OGC distances for targeting
+        ogc_distances = get_ogc_distances(gc2_shot) if OPENGOLFCOACH_AVAILABLE else None
+
+        if ogc_distances is not None:
+            ogc_carry, ogc_total = ogc_distances
+            logger.debug(f"Using OGC targeting: carry={ogc_carry:.1f}yd, total={ogc_total:.1f}yd")
+
+            # Run flight-only physics
+            flight_trajectory, landing_state, launch_data = self.physics.simulate_flight_only(
+                ball_speed_mph=ball_speed_mph,
+                vla_deg=vla_deg,
+                hla_deg=hla_deg,
+                backspin_rpm=backspin_rpm,
+                sidespin_rpm=sidespin_rpm,
+            )
+
+            # Run ground physics targeting OGC total distance
+            return self.physics.simulate_ground_to_target(
+                flight_trajectory=flight_trajectory,
+                landing_state=landing_state,
+                launch_data=launch_data,
+                target_total_yards=ogc_total,
+            )
+        else:
+            # Fallback to pure physics simulation
+            logger.debug("OGC not available, using pure physics simulation")
+            return self.physics.simulate(
+                ball_speed_mph=ball_speed_mph,
+                vla_deg=vla_deg,
+                hla_deg=hla_deg,
+                backspin_rpm=backspin_rpm,
+                sidespin_rpm=sidespin_rpm,
+            )
 
     def _enrich_with_opengolfcoach(self, result: ShotResult, shot: GC2ShotData) -> ShotResult:
         """Enrich a ShotResult with OpenGolfCoach derived values.
