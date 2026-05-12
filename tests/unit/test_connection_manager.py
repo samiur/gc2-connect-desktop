@@ -305,19 +305,17 @@ class TestGSProConnectionManager:
         registry = UICallbackRegistry()
         manager = GSProConnectionManager(registry)
 
-        with patch.object(manager, "_client", create=True):
-            # Create a mock client
-            mock_client = MagicMock()
-            mock_client.connect_async = AsyncMock(return_value=True)
-            mock_client.is_connected = True
-            mock_client._shot_number = 0
-            mock_client.add_disconnect_callback = MagicMock()
+        mock_client = MagicMock()
+        mock_client.connect = AsyncMock(return_value=True)
+        mock_client.is_connected = True
+        mock_client._shot_number = 0
+        mock_client.add_disconnect_callback = MagicMock()
 
-            with patch(
-                "gc2_connect.services.connection_manager.GSProClient",
-                return_value=mock_client,
-            ):
-                success = await manager.connect(host="127.0.0.1", port=921)
+        with patch(
+            "gc2_connect.services.connection_manager.GSProClient",
+            return_value=mock_client,
+        ):
+            success = await manager.connect(host="127.0.0.1", port=921)
 
         assert success
         assert manager.host == "127.0.0.1"
@@ -333,7 +331,7 @@ class TestGSProConnectionManager:
         registry.register_gspro_connect_callback(lambda s: connect_results.append(s), "token1")
 
         mock_client = MagicMock()
-        mock_client.connect_async = AsyncMock(return_value=True)
+        mock_client.connect = AsyncMock(return_value=True)
         mock_client.is_connected = True
         mock_client._shot_number = 0
         mock_client.add_disconnect_callback = MagicMock()
@@ -346,7 +344,8 @@ class TestGSProConnectionManager:
 
         assert connect_results == [True]
 
-    def test_shot_number_persists_across_disconnect(self) -> None:
+    @pytest.mark.asyncio
+    async def test_shot_number_persists_across_disconnect(self) -> None:
         """Test that shot number persists across disconnects."""
         registry = UICallbackRegistry()
         manager = GSProConnectionManager(registry)
@@ -357,10 +356,10 @@ class TestGSProConnectionManager:
         # Create mock client
         mock_client = MagicMock()
         mock_client.shot_number = 10
-        mock_client.disconnect = MagicMock()
+        mock_client.disconnect = AsyncMock()
         manager._client = mock_client
 
-        manager.disconnect()
+        await manager.disconnect()
 
         # Shot number should be preserved
         assert manager.shot_number == 10
@@ -374,7 +373,7 @@ class TestGSProConnectionManager:
         manager._shot_number = 15  # Previously had 15 shots
 
         mock_client = MagicMock()
-        mock_client.connect_async = AsyncMock(return_value=True)
+        mock_client.connect = AsyncMock(return_value=True)
         mock_client.is_connected = True
         mock_client._shot_number = 0  # Client starts at 0
         mock_client.add_disconnect_callback = MagicMock()
@@ -395,11 +394,11 @@ class TestGSProConnectionManager:
         manager = GSProConnectionManager(registry)
 
         mock_client = MagicMock()
-        mock_client.connect_async = AsyncMock(return_value=True)
+        mock_client.connect = AsyncMock(return_value=True)
         mock_client.is_connected = True
         mock_client._shot_number = 0
         mock_client.shot_number = 1  # After sending
-        mock_client.send_shot_async = AsyncMock(return_value={"Code": 200})
+        mock_client.send_shot = AsyncMock(return_value=None)
         mock_client.add_disconnect_callback = MagicMock()
 
         with patch(
@@ -409,10 +408,9 @@ class TestGSProConnectionManager:
             await manager.connect(host="127.0.0.1", port=921)
 
         shot = GC2ShotData(shot_id=1, ball_speed=150.0)
-        response = await manager.send_shot(shot)
+        await manager.send_shot(shot)
 
-        assert response == {"Code": 200}
-        mock_client.send_shot_async.assert_called_once_with(shot)
+        mock_client.send_shot.assert_called_once_with(shot)
 
 
 class TestSingletons:

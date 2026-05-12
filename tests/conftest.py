@@ -1,6 +1,7 @@
 # ABOUTME: Pytest configuration and shared fixtures for all tests.
 # ABOUTME: Contains fixtures for GC2 shot data, GSPro messages, and mock objects.
 
+import asyncio
 import json
 from typing import Any
 from unittest.mock import MagicMock
@@ -181,8 +182,8 @@ def gspro_error_response_dict() -> dict[str, Any]:
 
 
 @pytest.fixture
-def mock_gspro_server():
-    """Fixture that runs a mock GSPro server in a background thread.
+async def mock_gspro_server():
+    """Fixture that runs a mock GSPro server for testing.
 
     The server accepts shot data and returns success responses.
     Use `server.received_shots` to inspect what was received.
@@ -190,99 +191,59 @@ def mock_gspro_server():
     Yields:
         MockGSProServer instance with host, port, and received_shots attributes.
     """
-    import socket
-    import threading
-    from dataclasses import dataclass
-    from dataclasses import field as dataclass_field
+    from tests.simulators.gspro.config import MockGSProServerConfig, ResponseType
+    from tests.simulators.gspro.server import MockGSProServer
 
-    @dataclass
-    class MockGSProServer:
-        host: str
-        port: int
-        received_shots: list[dict[str, Any]] = dataclass_field(default_factory=list)
-        _server: socket.socket | None = None
-        _thread: threading.Thread | None = None
-        _running: bool = False
-        _conn: socket.socket | None = None
+    class _ServerAdapter:
+        """Adapter exposing received_shots as a list of raw dicts for test compatibility."""
 
-    def run_server(server: MockGSProServer) -> None:
-        """Run the mock GSPro server."""
-        server._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server._server.settimeout(0.5)  # Allow checking _running flag
-        server._server.bind((server.host, server.port))
-        server._server.listen(1)
+        def __init__(self, server: MockGSProServer) -> None:
+            self._server = server
 
-        while server._running:
-            try:
-                conn, _addr = server._server.accept()
-                server._conn = conn
-                conn.settimeout(0.5)
+        @property
+        def host(self) -> str:
+            return self._server.host
 
-                while server._running:
-                    try:
-                        data = conn.recv(4096)
-                        if not data:
-                            break
+        @property
+        def port(self) -> int:
+            return self._server.port
 
-                        # Parse and store received shot
-                        try:
-                            message = json.loads(data.decode("utf-8"))
-                            server.received_shots.append(message)
+        @property
+        def received_shots(self) -> list[dict[str, Any]]:
+            """Return all received messages as raw dicts."""
+            return [s.raw_message for s in self._server.get_shots()]
 
-                            # Send success response with player info
-                            # Use Code 201 to include player info (per GSPro API)
-                            response = {
-                                "Code": 201,
-                                "Message": "Shot received with player info",
-                                "Player": {"Handed": "RH", "Club": "DR"},
-                            }
-                            conn.sendall(json.dumps(response).encode("utf-8"))
-                        except json.JSONDecodeError:
-                            pass
+    config = MockGSProServerConfig(
+        host="127.0.0.1",
+        port=0,
+        response_type=ResponseType.SUCCESS,
+    )
+    # Override the response to use Code 201 with player info (what tests expect)
+    server = MockGSProServer(config)
 
-                    except TimeoutError:
-                        continue
-                    except OSError:
-                        break
+    # Patch the response to send Code 201 instead of 200
+    import gc2_connect  # noqa: F401
 
-                conn.close()
-                server._conn = None
-
-            except TimeoutError:
-                continue
-            except OSError:
-                break
-
-        if server._server:
-            server._server.close()
-
-    # Find a free port
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-
-    server = MockGSProServer(host="127.0.0.1", port=port)
-    server._running = True
-    server._thread = threading.Thread(target=run_server, args=(server,), daemon=True)
-    server._thread.start()
-
-    # Give server time to start
-    import time
-
-    time.sleep(0.1)
-
-    yield server
-
-    # Cleanup
-    server._running = False
-    if server._conn:
+    async def _send_response_201(writer, _shot):  # type: ignore[no-untyped-def]
+        response = {
+            "Code": 201,
+            "Message": "Shot received with player info",
+            "Player": {"Handed": "RH", "Club": "DR"},
+        }
         try:
-            server._conn.close()
+            writer.write(json.dumps(response).encode("utf-8"))
+            await writer.drain()
         except Exception:
             pass
-    if server._thread:
-        server._thread.join(timeout=1.0)
+
+    server._send_response = _send_response_201  # type: ignore[method-assign]
+
+    await server.start()
+    adapter = _ServerAdapter(server)
+
+    yield adapter
+
+    await server.stop()
 
 
 @pytest.fixture
@@ -297,19 +258,18 @@ def mock_gc2_reader():
 
 
 @pytest.fixture
-def gspro_client(mock_gspro_server):
+async def gspro_client(mock_gspro_server):
     """Fixture providing a GSProClient connected to the mock server."""
-    import time
-
     from gc2_connect.gspro.client import GSProClient
 
     client = GSProClient(host=mock_gspro_server.host, port=mock_gspro_server.port)
-    connected = client.connect()
+    connected = await client.connect()
     assert connected, "Failed to connect to mock GSPro server"
 
-    # Wait for heartbeat to be processed by server
-    time.sleep(0.1)
+    await asyncio.sleep(0.05)
 
-    yield client
-    if client.is_connected:
-        client.disconnect()
+    try:
+        yield client
+    finally:
+        if client.is_connected:
+            await client.disconnect()

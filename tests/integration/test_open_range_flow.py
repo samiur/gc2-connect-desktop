@@ -12,6 +12,7 @@ to visualization. Covers:
 
 from __future__ import annotations
 
+import asyncio
 import time
 from unittest.mock import AsyncMock
 
@@ -307,6 +308,9 @@ class TestModeSwitchingWithConnections:
 
         # Should be able to send to GSPro
         await router.route_shot(sample_gc2_shot)
+
+        # Let the mock server's reader task process the shot
+        await asyncio.sleep(0.1)
 
         # Verify shot was received by GSPro server
         shot_messages = [

@@ -40,14 +40,15 @@ class ReconnectionManager:
 
     def __init__(
         self,
-        max_retries: int = 5,
+        max_retries: int | None = 5,
         base_delay: float = 1.0,
         max_delay: float = 16.0,
     ) -> None:
         """Initialize the reconnection manager.
 
         Args:
-            max_retries: Maximum number of reconnection attempts
+            max_retries: Maximum number of reconnection attempts. ``None`` means
+                retry forever until ``cancel()`` is called.
             base_delay: Initial delay between retries in seconds
             max_delay: Maximum delay between retries in seconds
         """
@@ -143,8 +144,15 @@ class ReconnectionManager:
         self._retry_count = 0
         self._set_state(ReconnectionState.CONNECTING)
 
+        def _should_continue(attempt: int) -> bool:
+            if self._cancelled:
+                return False
+            if self.max_retries is None:
+                return True
+            return attempt < self.max_retries
+
         attempt = 0
-        while attempt < self.max_retries and not self._cancelled:
+        while _should_continue(attempt):
             try:
                 # Call connect function (handle both sync and async)
                 result = connect_fn()
@@ -161,17 +169,15 @@ class ReconnectionManager:
             except Exception as e:
                 logger.warning(f"Connection attempt {attempt + 1} failed: {e}")
 
-            # Failed - calculate delay and wait
             attempt += 1
             self._retry_count = attempt
 
-            if attempt < self.max_retries and not self._cancelled:
+            if _should_continue(attempt):
                 delay = self.get_delay_for_attempt(attempt - 1)
                 self._set_state(ReconnectionState.RECONNECTING)
                 self._notify_attempt(attempt, delay)
-                logger.info(
-                    f"Reconnection attempt {attempt}/{self.max_retries}, waiting {delay:.1f}s..."
-                )
+                max_str = "∞" if self.max_retries is None else str(self.max_retries)
+                logger.info(f"Reconnection attempt {attempt}/{max_str}, waiting {delay:.1f}s...")
 
                 try:
                     await asyncio.sleep(delay)
@@ -185,7 +191,7 @@ class ReconnectionManager:
             return False
 
         self._set_state(ReconnectionState.FAILED)
-        logger.error(f"Reconnection failed after {self.max_retries} attempts")
+        logger.error(f"Reconnection failed after {self._retry_count} attempts")
         return False
 
     def cancel(self) -> None:
