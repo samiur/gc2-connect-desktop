@@ -161,12 +161,12 @@ class TestShotRouting:
     ) -> None:
         """Test that shots are routed to GSPro in GSPRO mode."""
         mock_client = MagicMock()
-        mock_client.send_shot_async = AsyncMock()
+        mock_client.send_shot = AsyncMock()
         shot_router.set_gspro_client(mock_client)
 
         await shot_router.route_shot(sample_shot)
 
-        mock_client.send_shot_async.assert_called_once_with(sample_shot)
+        mock_client.send_shot.assert_called_once_with(sample_shot)
 
     @pytest.mark.asyncio
     async def test_route_shot_open_range_mode_calls_engine(
@@ -276,7 +276,7 @@ class TestShotCallbacks:
     ) -> None:
         """Test that shot result callback is not called in GSPro mode."""
         mock_client = MagicMock()
-        mock_client.send_shot_async = AsyncMock()
+        mock_client.send_shot = AsyncMock()
         shot_router.set_gspro_client(mock_client)
 
         result_callback = AsyncMock()

@@ -63,7 +63,7 @@ def _prevent_app_nap(reason: str = "Processing GC2 shot data") -> None:
         return
 
     try:
-        from Foundation import NSProcessInfo  # type: ignore[import-not-found]
+        from Foundation import NSProcessInfo  # type: ignore[import-untyped]
 
         # NSActivityUserInitiatedAllowingIdleSystemSleep = 0x00FFFFFF
         # This prevents App Nap but allows system sleep
@@ -266,8 +266,8 @@ class ShotForwarder:
             return False
 
         try:
-            response = await self._gspro_mgr.send_shot(shot)
-            logger.info(f"Shot #{shot.shot_id} forwarded to GSPro (response: {response})")
+            await self._gspro_mgr.send_shot(shot)
+            logger.info(f"Shot #{shot.shot_id} forwarded to GSPro")
             return True
         except Exception as e:
             logger.error(f"Failed to forward shot #{shot.shot_id} to GSPro: {e}")
@@ -486,7 +486,7 @@ class GSProConnectionManager:
             True if connection succeeded, False otherwise.
         """
         if self._client is not None:
-            self.disconnect()
+            await self.disconnect()
 
         self._host = host
         self._port = port
@@ -496,7 +496,7 @@ class GSProConnectionManager:
         # Restore shot number from our persistent storage
         self._client._shot_number = self._shot_number
 
-        success = await self._client.connect_async()
+        success = await self._client.connect()
         self._callback_registry.notify_gspro_connect(success)
 
         if success:
@@ -507,42 +507,40 @@ class GSProConnectionManager:
 
         return success
 
-    def disconnect(self) -> None:
+    async def disconnect(self) -> None:
         """Disconnect from GSPro."""
         if self._client is not None:
             # Save shot number before disconnect (client resets it)
             self._shot_number = self._client.shot_number
-            self._client.disconnect()
+            await self._client.disconnect()
             self._client = None
 
         logger.info("GSPro disconnected via connection manager")
 
-    async def send_shot(self, shot: GC2ShotData) -> Any:
+    async def send_shot(self, shot: GC2ShotData) -> None:
         """Send shot to GSPro.
+
+        The GSPro ack arrives asynchronously via response callbacks.
 
         Args:
             shot: The shot data to send.
-
-        Returns:
-            Response from GSPro, or None if not connected.
         """
         if self._client is None or not self._client.is_connected:
             logger.warning("Cannot send shot: GSPro not connected")
-            return None
+            return
 
-        response = await self._client.send_shot_async(shot)
+        await self._client.send_shot(shot)
         # Keep our shot number in sync
         self._shot_number = self._client.shot_number
-        return response
 
-    def send_status(self, status: GC2BallStatus) -> None:
+    async def send_status(self, status: GC2BallStatus) -> None:
         """Send ball status to GSPro.
 
         Args:
             status: The ball status to send.
         """
         if self._client is not None and self._client.is_connected:
-            self._client.send_status(status)
+            await self._client.send_status(status)
 
     def _on_disconnect(self) -> None:
         """Internal callback for disconnection from the client."""
@@ -614,7 +612,12 @@ def reset_all() -> None:
     if _gc2_manager is not None:
         _gc2_manager.disconnect()
     if _gspro_manager is not None:
-        _gspro_manager.disconnect()
+        # Schedule async disconnect on the running event loop, or best-effort skip
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_gspro_manager.disconnect())
+        except RuntimeError:
+            pass  # No running event loop; the manager will be GC'd
     if _shot_forwarder is not None:
         _shot_forwarder.disable()
 
@@ -635,6 +638,11 @@ def shutdown_all() -> None:
     if _gc2_manager is not None:
         _gc2_manager.disconnect()
     if _gspro_manager is not None:
-        _gspro_manager.disconnect()
+        # Schedule async disconnect on the running event loop, or best-effort skip
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_gspro_manager.disconnect())
+        except RuntimeError:
+            pass  # No running event loop; skip graceful disconnect
 
     logger.info("All connections shut down")

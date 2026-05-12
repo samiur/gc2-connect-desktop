@@ -330,7 +330,7 @@ class GC2ConnectApp:
     async def _reconnect_gspro(self) -> None:
         """Attempt to reconnect to GSPro."""
         # Disconnect existing connection via manager
-        self._gspro_mgr.disconnect()
+        await self._gspro_mgr.disconnect()
 
         # Get connection parameters
         host = self.gspro_host_input.value if self.gspro_host_input else self.settings.gspro.host
@@ -916,7 +916,7 @@ class GC2ConnectApp:
         self._shot_forwarder.disable()
 
         # Disconnect via manager
-        self._gspro_mgr.disconnect()
+        asyncio.create_task(self._gspro_mgr.disconnect())
 
         self.gspro_status_label.text = "Disconnected"
         self.gspro_status_label.classes(remove="text-green-500 text-yellow-500", add="text-red-500")
@@ -991,7 +991,7 @@ class GC2ConnectApp:
 
             # Send status to GSPro if connected (use manager)
             if self.send_status_to_gspro and self._gspro_mgr.is_connected:
-                self._gspro_mgr.send_status(status)
+                asyncio.create_task(self._gspro_mgr.send_status(status))
         except Exception as e:
             logger.error(f"Error handling status: {e}")
 

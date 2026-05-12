@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from gc2_connect.gspro.client import DEFAULT_HOST, DEFAULT_PORT, GSProClient
 from gc2_connect.models import GC2ShotData, GSProResponse
@@ -48,80 +50,108 @@ class TestGSProClientConnectionState:
         client = GSProClient()
         assert client.shot_number == 0
 
-    def test_connect_success(self, mock_socket: MagicMock):
+    @pytest.mark.asyncio
+    async def test_connect_success(self):
         """Test successful connection."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket):
-            result = client.connect()
+        mock_reader = MagicMock()
+        mock_writer = MagicMock()
+        mock_writer.drain = AsyncMock()
+        mock_writer.write = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+        mock_writer.get_extra_info = MagicMock(return_value=None)
+
+        with (
+            patch("asyncio.open_connection", return_value=(mock_reader, mock_writer)),
+            patch.object(client, "_reader_loop", new=AsyncMock()),
+        ):
+            result = await client.connect()
+
         assert result is True
         assert client.is_connected is True
 
-    def test_connect_failure(self, mock_socket: MagicMock):
+    @pytest.mark.asyncio
+    async def test_connect_failure(self):
         """Test failed connection."""
         client = GSProClient()
-        with patch("socket.create_connection", side_effect=OSError("Connection refused")):
-            result = client.connect()
+        with patch("asyncio.open_connection", side_effect=OSError("Connection refused")):
+            result = await client.connect()
+
         assert result is False
         assert client.is_connected is False
 
-    def test_disconnect(self, mock_socket: MagicMock):
+    @pytest.mark.asyncio
+    async def test_disconnect(self):
         """Test disconnect resets state."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket):
-            client.connect()
-        assert client.is_connected is True
-        client.disconnect()
+        client._connected = True
+        writer = MagicMock()
+        writer.write = MagicMock()
+        writer.drain = AsyncMock()
+        writer.close = MagicMock()
+        writer.wait_closed = AsyncMock()
+        client._writer = writer
+
+        with patch.object(client, "_send_shutdown_heartbeat", new=AsyncMock()):
+            await client.disconnect()
+
         assert client.is_connected is False
 
-    def test_disconnect_when_not_connected(self):
+    @pytest.mark.asyncio
+    async def test_disconnect_when_not_connected(self):
         """Test disconnect when not connected does not error."""
         client = GSProClient()
-        client.disconnect()
+        await client.disconnect()
         assert client.is_connected is False
 
 
 class TestGSProClientMessageFormatting:
     """Tests for GSProClient message formatting."""
 
-    def test_send_shot_increments_shot_number(
-        self,
-        sample_gc2_shot: GC2ShotData,
-        mock_socket_with_success_response: MagicMock,
-    ):
+    @pytest.mark.asyncio
+    async def test_send_shot_increments_shot_number(self, sample_gc2_shot: GC2ShotData):
         """Test that send_shot increments the shot number."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket_with_success_response):
-            client.connect()
-            assert client.shot_number == 0
+        client._connected = True
+        writer = MagicMock()
+        writer.write = MagicMock()
+        writer.drain = AsyncMock()
+        client._writer = writer
 
-            client.send_shot(sample_gc2_shot)
-            assert client.shot_number == 1
+        assert client.shot_number == 0
 
-            client.send_shot(sample_gc2_shot)
-            assert client.shot_number == 2
+        await client.send_shot(sample_gc2_shot)
+        assert client.shot_number == 1
 
-    def test_send_shot_when_not_connected(self, sample_gc2_shot: GC2ShotData):
+        await client.send_shot(sample_gc2_shot)
+        assert client.shot_number == 2
+
+    @pytest.mark.asyncio
+    async def test_send_shot_when_not_connected(self, sample_gc2_shot: GC2ShotData):
         """Test that send_shot returns None when not connected."""
         client = GSProClient()
-        result = client.send_shot(sample_gc2_shot)
+        result = await client.send_shot(sample_gc2_shot)
         assert result is None
         assert client.shot_number == 0
 
-    def test_send_shot_message_structure(
-        self,
-        sample_gc2_shot: GC2ShotData,
-        mock_socket_with_success_response: MagicMock,
-    ):
+    @pytest.mark.asyncio
+    async def test_send_shot_message_structure(self, sample_gc2_shot: GC2ShotData):
         """Test that send_shot sends correctly formatted JSON."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket_with_success_response):
-            client.connect()
-            client.send_shot(sample_gc2_shot)
+        client._connected = True
+        writer = MagicMock()
+        writer.write = MagicMock()
+        writer.drain = AsyncMock()
+        client._writer = writer
 
-        # Verify sendall was called with valid JSON
-        call_args = mock_socket_with_success_response.sendall.call_args
-        sent_data = call_args[0][0].decode("utf-8")
-        message = json.loads(sent_data)
+        await client.send_shot(sample_gc2_shot)
+
+        # Verify write was called with valid JSON + newline
+        writer.write.assert_called()
+        sent_bytes = writer.write.call_args[0][0]
+        assert sent_bytes.endswith(b"\n")
+        message = json.loads(sent_bytes[:-1].decode("utf-8"))
 
         # Verify message structure
         assert "DeviceID" in message
@@ -132,181 +162,149 @@ class TestGSProClientMessageFormatting:
         # Ball speed is sent as mph directly to GSPro
         assert message["BallData"]["Speed"] == sample_gc2_shot.ball_speed
 
-    def test_heartbeat_message_structure(
-        self,
-        mock_socket: MagicMock,
-    ):
+    @pytest.mark.asyncio
+    async def test_heartbeat_message_structure(self):
         """Test that heartbeat sends correctly formatted message."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket):
-            client.connect()
-            # Second heartbeat (first is sent during connect)
-            client.send_heartbeat()
+        client._connected = True
+        writer = MagicMock()
+        writer.write = MagicMock()
+        writer.drain = AsyncMock()
+        client._writer = writer
 
-        # Verify sendall was called with valid JSON (check last call)
-        call_args = mock_socket.sendall.call_args
-        sent_data = call_args[0][0].decode("utf-8")
-        message = json.loads(sent_data)
+        await client.send_heartbeat()
+
+        # Verify write was called with valid JSON + newline
+        writer.write.assert_called_once()
+        sent_bytes = writer.write.call_args[0][0]
+        assert sent_bytes.endswith(b"\n")
+        message = json.loads(sent_bytes[:-1].decode("utf-8"))
 
         # Verify heartbeat message
         assert message["ShotDataOptions"]["IsHeartBeat"] is True
         assert message["ShotDataOptions"]["ContainsBallData"] is False
         assert message["ShotDataOptions"]["ContainsClubData"] is False
 
-    def test_send_heartbeat_when_not_connected(self):
+    @pytest.mark.asyncio
+    async def test_send_heartbeat_when_not_connected(self):
         """Test that send_heartbeat returns None when not connected."""
         client = GSProClient()
-        result = client.send_heartbeat()
+        result = await client.send_heartbeat()
         assert result is None
 
-    def test_send_heartbeat_returns_none(
-        self,
-        mock_socket: MagicMock,
-    ):
+    @pytest.mark.asyncio
+    async def test_send_heartbeat_returns_none(self):
         """Test that send_heartbeat returns None (GSPro doesn't respond to heartbeats)."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket):
-            client.connect()
-            result = client.send_heartbeat()
+        client._connected = True
+        writer = MagicMock()
+        writer.write = MagicMock()
+        writer.drain = AsyncMock()
+        client._writer = writer
+
+        result = await client.send_heartbeat()
         assert result is None
 
 
 class TestGSProClientResponseParsing:
-    """Tests for GSProClient response parsing."""
+    """Tests for GSProClient response parsing via _drain_buffer and _handle_response."""
 
-    def test_response_parsing_success(
-        self,
-        sample_gc2_shot: GC2ShotData,
-        mock_socket_with_success_response: MagicMock,
-    ):
-        """Test parsing of success response."""
+    def test_handle_response_code_200_fires_response_callback(self):
+        """Test that code 200 fires response callbacks."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket_with_success_response):
-            client.connect()
-            response = client.send_shot(sample_gc2_shot)
+        responses = []
+        client.add_response_callback(lambda r: responses.append(r))
 
-        assert response is not None
-        assert response.Code == 200
-        assert response.is_success is True
+        client._handle_response({"Code": 200, "Message": "Shot received"})
 
-    def test_response_parsing_player_info(
-        self,
-        sample_gc2_shot: GC2ShotData,
-        mock_socket_with_player_response: MagicMock,
-    ):
-        """Test parsing of response with player info."""
+        assert len(responses) == 1
+        assert responses[0].Code == 200
+        assert responses[0].is_success is True
+
+    def test_handle_response_code_201_updates_player(self):
+        """Test that code 201 updates current_player."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket_with_player_response):
-            client.connect()
-            response = client.send_shot(sample_gc2_shot)
+        player_data = {"Handed": "RH", "Club": "DR"}
 
-        assert response is not None
-        assert response.Code == 201
-        assert response.Player is not None
-        assert response.Player["Handed"] == "RH"
-        assert response.Player["Club"] == "DR"
+        client._handle_response({"Code": 201, "Player": player_data, "Message": "Player info"})
 
-        # Verify client stores player info
         assert client.current_player is not None
         assert client.current_player["Handed"] == "RH"
 
-    def test_response_parsing_error_code(
-        self,
-        sample_gc2_shot: GC2ShotData,
-        mock_socket: MagicMock,
-    ):
-        """Test parsing of error response."""
-        error_response = {"Code": 500, "Message": "Internal error"}
-        mock_socket.recv.return_value = json.dumps(error_response).encode("utf-8")
-
+    def test_handle_response_error_code(self):
+        """Test that error codes fire response callbacks."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket):
-            client.connect()
-            response = client.send_shot(sample_gc2_shot)
+        responses = []
+        client.add_response_callback(lambda r: responses.append(r))
 
-        assert response is not None
-        assert response.Code == 500
-        assert response.is_success is False
-        assert response.Message == "Internal error"
+        client._handle_response({"Code": 500, "Message": "Internal error"})
 
-    def test_empty_response(
-        self,
-        sample_gc2_shot: GC2ShotData,
-        mock_socket: MagicMock,
-    ):
-        """Test handling of empty response."""
-        mock_socket.recv.return_value = b""
+        assert len(responses) == 1
+        assert responses[0].Code == 500
+        assert responses[0].is_success is False
+        assert responses[0].Message == "Internal error"
 
+    def test_drain_buffer_parses_json(self):
+        """Test that _drain_buffer correctly parses a JSON object."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket):
-            client.connect()
-            response = client.send_shot(sample_gc2_shot)
+        responses = []
+        client.add_response_callback(lambda r: responses.append(r))
 
-        assert response is None
+        data = json.dumps({"Code": 200, "Message": "OK"}).encode("utf-8")
+        remainder = client._drain_buffer(data)
 
-    def test_invalid_json_response(
-        self,
-        sample_gc2_shot: GC2ShotData,
-        mock_socket: MagicMock,
-    ):
-        """Test handling of invalid JSON response."""
-        mock_socket.recv.return_value = b"not valid json"
+        assert len(responses) == 1
+        assert responses[0].Code == 200
+        assert remainder == b""
 
+    def test_drain_buffer_handles_multiple_objects(self):
+        """Test that _drain_buffer handles multiple JSON objects."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket):
-            client.connect()
-            response = client.send_shot(sample_gc2_shot)
+        responses = []
+        client.add_response_callback(lambda r: responses.append(r))
 
-        assert response is None
+        data = json.dumps({"Code": 200, "Message": "OK"}).encode("utf-8") + json.dumps(
+            {"Code": 201, "Message": "Player info", "Player": {}}
+        ).encode("utf-8")
+        remainder = client._drain_buffer(data)
 
-    def test_socket_timeout(
-        self,
-        sample_gc2_shot: GC2ShotData,
-        mock_socket: MagicMock,
-    ):
-        """Test handling of socket timeout."""
-        mock_socket.recv.side_effect = TimeoutError("Timeout")
+        assert len(responses) == 2
+        assert remainder == b""
 
+    def test_drain_buffer_returns_incomplete(self):
+        """Test that _drain_buffer returns incomplete JSON."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock_socket):
-            client.connect()
-            response = client.send_shot(sample_gc2_shot)
+        incomplete = b'{"Code": 200, "Mes'
+        remainder = client._drain_buffer(incomplete)
+        assert remainder == incomplete
 
-        assert response is None
-
-    def test_socket_error_disconnects(
-        self,
-        sample_gc2_shot: GC2ShotData,
-    ):
-        """Test that socket error sets connected to False."""
-        # Create a custom mock for this test
-        mock = MagicMock()
-        mock.sendall.return_value = None
-        mock.setsockopt.return_value = None
-        mock.settimeout.return_value = None
-
-        # Track blocking mode and configure recv to:
-        # 1. Raise BlockingIOError in non-blocking mode (buffer clear)
-        # 2. Raise OSError in blocking mode (simulating connection reset)
-        mock._blocking = True
-
-        def setblocking(blocking: bool):
-            mock._blocking = blocking
-
-        def recv_side_effect(_size: int):
-            if not mock._blocking:
-                raise BlockingIOError("Resource temporarily unavailable")
-            raise OSError("Connection reset")
-
-        mock.setblocking.side_effect = setblocking
-        mock.recv.side_effect = recv_side_effect
-
+    def test_drain_buffer_handles_gspro_ready(self):
+        """Test that _drain_buffer handles bare 'GSPro ready' string."""
         client = GSProClient()
-        with patch("socket.create_connection", return_value=mock):
-            client.connect()
-            assert client.is_connected is True
-            client.send_shot(sample_gc2_shot)
-            assert client.is_connected is False
+        match_started_events = []
+        client.add_match_started_callback(lambda: match_started_events.append(True))
+
+        with (
+            patch.object(client, "_start_heartbeat_timer"),
+            patch.object(client, "_schedule_heartbeat"),
+        ):
+            remainder = client._drain_buffer(b"GSPro ready\n")
+
+        assert client.match_started is True
+        assert remainder == b""
+
+    @pytest.mark.asyncio
+    async def test_send_shot_returns_none(self, sample_gc2_shot: GC2ShotData):
+        """Test that send_shot returns None (ack arrives via callback)."""
+        client = GSProClient()
+        client._connected = True
+        writer = MagicMock()
+        writer.write = MagicMock()
+        writer.drain = AsyncMock()
+        client._writer = writer
+
+        result = await client.send_shot(sample_gc2_shot)
+        assert result is None
 
 
 class TestGSProClientCallbacks:
@@ -334,44 +332,30 @@ class TestGSProClientCallbacks:
         client.remove_response_callback(callback)
         # Should not raise an error
 
-    def test_callback_invoked_on_response(
-        self,
-        sample_gc2_shot: GC2ShotData,
-        mock_socket_with_success_response: MagicMock,
-    ):
-        """Test that callbacks are invoked when response is received."""
+    def test_callback_invoked_on_handle_response(self):
+        """Test that callbacks are invoked when _handle_response is called."""
         client = GSProClient()
         callback = MagicMock()
+        client.add_response_callback(callback)
 
-        with patch("socket.create_connection", return_value=mock_socket_with_success_response):
-            client.connect()
-            # Add callback after connect so we only see shot responses
-            client.add_response_callback(callback)
-            client.send_shot(sample_gc2_shot)
+        client._handle_response({"Code": 200, "Message": "OK"})
 
         callback.assert_called_once()
         response = callback.call_args[0][0]
         assert isinstance(response, GSProResponse)
         assert response.Code == 200
 
-    def test_callback_exception_does_not_break_others(
-        self,
-        sample_gc2_shot: GC2ShotData,
-        mock_socket_with_success_response: MagicMock,
-    ):
+    def test_callback_exception_does_not_break_others(self):
         """Test that callback exceptions don't prevent other callbacks."""
         client = GSProClient()
         failing_callback = MagicMock(side_effect=Exception("Callback error"))
         working_callback = MagicMock()
 
-        with patch("socket.create_connection", return_value=mock_socket_with_success_response):
-            client.connect()
-            # Add callbacks after connect so we only see shot responses
-            client.add_response_callback(failing_callback)
-            client.add_response_callback(working_callback)
-            client.send_shot(sample_gc2_shot)
+        client.add_response_callback(failing_callback)
+        client.add_response_callback(working_callback)
 
-        # Both callbacks should have been called
+        client._handle_response({"Code": 200, "Message": "OK"})
+
         failing_callback.assert_called_once()
         working_callback.assert_called_once()
 

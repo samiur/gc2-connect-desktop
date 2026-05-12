@@ -1,6 +1,6 @@
 # ABOUTME: TCP client for GSPro Open Connect API v1.
 # ABOUTME: Sends shot data to GSPro golf simulator and handles responses.
-"""GSPro Open Connect API v1 client."""
+"""GSPro Open Connect API v1 client (async)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 import socket
-import time
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -35,18 +35,25 @@ def _notify_callbacks(callbacks: list[Callable[..., None]], *args: Any) -> None:
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 921
 HEARTBEAT_INTERVAL_SECONDS = 6.0
+CONNECT_TIMEOUT_SECONDS = 5.0
+SHUTDOWN_GRACE_SECONDS = 0.250
+KEEPALIVE_IDLE_SECONDS = 30
+KEEPALIVE_INTVL_SECONDS = 10
+KEEPALIVE_CNT = 3
 
 
 class GSProClient:
-    """Client for GSPro Open Connect API v1."""
+    """Async client for GSPro Open Connect API v1."""
 
     def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT):
         self.host = host
         self.port = port
-        self._socket: socket.socket | None = None
+        self._reader: asyncio.StreamReader | None = None
+        self._writer: asyncio.StreamWriter | None = None
         self._connected = False
         self._shot_number = 0
         self._current_player: dict[str, Any] | None = None
+
         self._response_callbacks: list[Callable[[GSProResponse], None]] = []
         self._disconnect_callbacks: list[Callable[[], None]] = []
 
@@ -55,14 +62,12 @@ class GSProClient:
         self._match_started_callbacks: list[Callable[[], None]] = []
         self._match_ended_callbacks: list[Callable[[], None]] = []
 
-        # Reader loop state
         self._reader_task: asyncio.Task[None] | None = None
-        self._reader_running = False
+        self._heartbeat_task: asyncio.Task[None] | None = None
 
         # Match state tracking for heartbeat logic
         self._match_started = False
         self._hardware_ready = False
-        self._heartbeat_task: asyncio.Task[None] | None = None
 
         # Register internal handlers for match state changes
         self._match_started_callbacks.append(self._on_match_started)
@@ -105,11 +110,20 @@ class GSProClient:
 
         Called when GC2 status changes (FLAGS in 0M message).
         """
-        if self._hardware_ready != ready:
-            self._hardware_ready = ready
-            # Send status update if match is active
-            if self._match_started:
-                self.send_heartbeat()
+        if self._hardware_ready == ready:
+            return
+        self._hardware_ready = ready
+        # Send status update if match is active
+        if not self._match_started:
+            return
+        self._schedule_heartbeat()
+
+    def _schedule_heartbeat(self) -> None:
+        """Fire-and-forget a heartbeat from a sync context."""
+        try:
+            asyncio.create_task(self.send_heartbeat())
+        except RuntimeError:
+            logger.debug("No running loop; skipping heartbeat schedule")
 
     def add_response_callback(self, callback: Callable[[GSProResponse], None]) -> None:
         """Add a callback for GSPro responses."""
@@ -176,10 +190,11 @@ class GSProClient:
 
         Starts the heartbeat timer and sends current ready status.
         """
-        if not self._match_started:
-            self._match_started = True
-            self._start_heartbeat_timer()
-            self.send_heartbeat()
+        if self._match_started:
+            return
+        self._match_started = True
+        self._start_heartbeat_timer()
+        self._schedule_heartbeat()
 
     def _on_match_ended(self) -> None:
         """Handle match ended event (code 203).
@@ -187,9 +202,10 @@ class GSProClient:
         Stops the heartbeat timer. Does not send "not ready" here;
         the disconnect sequence handles the final "not ready" message.
         """
-        if self._match_started:
-            self._match_started = False
-            self._stop_heartbeat_timer()
+        if not self._match_started:
+            return
+        self._match_started = False
+        self._stop_heartbeat_timer()
 
     def _start_heartbeat_timer(self) -> None:
         """Start periodic heartbeat timer."""
@@ -203,21 +219,298 @@ class GSProClient:
 
     def _stop_heartbeat_timer(self) -> None:
         """Stop the heartbeat timer."""
-        if self._heartbeat_task:
+        if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()
             self._heartbeat_task = None
             logger.info("GSPro heartbeat timer stopped")
 
     async def _heartbeat_loop(self) -> None:
         """Send heartbeats at regular intervals while match is active."""
-        while self._connected and self._match_started:
-            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
-            if self._connected and self._match_started:
-                self.send_heartbeat()
+        try:
+            while self._connected and self._match_started:
+                await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+                if self._connected and self._match_started:
+                    await self.send_heartbeat()
+        except asyncio.CancelledError:
+            pass
+
+    # -------------------------------------------------------------------------
+    # Socket configuration
+    # -------------------------------------------------------------------------
+
+    def _configure_socket(self, sock: socket.socket) -> None:
+        """Configure socket options for TCP_NODELAY and SO_KEEPALIVE."""
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        if sys.platform == "darwin" and hasattr(socket, "TCP_KEEPALIVE"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPALIVE, KEEPALIVE_IDLE_SECONDS)
+        elif sys.platform.startswith("linux"):
+            if hasattr(socket, "TCP_KEEPIDLE"):
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, KEEPALIVE_IDLE_SECONDS)
+            if hasattr(socket, "TCP_KEEPINTVL"):
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, KEEPALIVE_INTVL_SECONDS)
+            if hasattr(socket, "TCP_KEEPCNT"):
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, KEEPALIVE_CNT)
+
+    # -------------------------------------------------------------------------
+    # Connection management
+    # -------------------------------------------------------------------------
+
+    async def connect(self) -> bool:
+        """Connect to GSPro."""
+        try:
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port),
+                timeout=CONNECT_TIMEOUT_SECONDS,
+            )
+        except (TimeoutError, asyncio.TimeoutError, OSError) as e:
+            logger.error(f"Failed to connect to GSPro: {e}")
+            self._reader = None
+            self._writer = None
+            self._connected = False
+            return False
+
+        assert self._writer is not None
+        sock = self._writer.get_extra_info("socket")
+        if sock is not None:
+            self._configure_socket(sock)
+
+        self._connected = True
+        logger.info(f"Connected to GSPro at {self.host}:{self.port}")
+
+        # Send initial heartbeat to register with GSPro
+        logger.info("Sending initial heartbeat to GSPro...")
+        await self.send_heartbeat()
+        logger.info("Initial heartbeat sent")
+
+        # Start background reader loop for unsolicited GSPro messages
+        self._reader_task = asyncio.create_task(self._reader_loop())
+        return True
+
+    async def disconnect(self) -> None:
+        """Cleanly disconnect from GSPro.
+
+        Following OpenSkyPlus2 reference implementation:
+        1. Stop heartbeat timer (stop sending heartbeats)
+        2. Cancel reader task
+        3. Send heartbeat with LaunchMonitorIsReady=false
+        4. Wait 250ms for GSPro to process
+        5. Close writer
+        """
+        if self._writer is None and not self._connected:
+            return
+
+        # Step 1: Stop the heartbeat timer
+        self._stop_heartbeat_timer()
+        self._match_started = False
+
+        # Step 2: Cancel the reader task
+        if self._reader_task is not None:
+            self._reader_task.cancel()
+            self._reader_task = None
+
+        # Step 3: Tell GSPro we're going offline
+        if self._writer is not None and self._connected:
+            try:
+                await self._send_shutdown_heartbeat()
+                await asyncio.sleep(SHUTDOWN_GRACE_SECONDS)
+            except Exception as e:
+                logger.debug(f"Error sending shutdown heartbeat: {e}")
+
+        # Step 4: Close the writer
+        if self._writer is not None:
+            try:
+                self._writer.close()
+                await self._writer.wait_closed()
+            except Exception:
+                pass
+
+        # Step 5: Clear internal state
+        self._reader = None
+        self._writer = None
+        self._connected = False
+        self._shot_number = 0
+        self._current_player = None
+        logger.info("Disconnected from GSPro (clean shutdown)")
+
+    async def _send_shutdown_heartbeat(self) -> None:
+        """Send final heartbeat indicating launch monitor is going offline.
+
+        This tells GSPro the launch monitor is going offline gracefully.
+        """
+        if self._writer is None:
+            return
+
+        message = GSProShotMessage(
+            ShotNumber=self._shot_number,
+            ShotDataOptions=GSProShotOptions(
+                ContainsBallData=False,
+                ContainsClubData=False,
+                LaunchMonitorIsReady=False,  # Key: telling GSPro we're going offline
+                IsHeartBeat=True,
+            ),
+        )
+        payload = json.dumps(message.to_dict()).encode("utf-8") + b"\n"
+        self._writer.write(payload)
+        await self._writer.drain()
+        logger.debug("Sent shutdown heartbeat (LaunchMonitorIsReady=false)")
+
+    # -------------------------------------------------------------------------
+    # Send methods
+    # -------------------------------------------------------------------------
+
+    async def send_shot(self, shot: GC2ShotData) -> None:
+        """Send a shot to GSPro.
+
+        The GSPro ack arrives asynchronously via the reader loop's response callbacks.
+        """
+        if not self._connected or self._writer is None:
+            logger.error("Not connected to GSPro")
+            return
+        self._shot_number += 1
+        message = GSProShotMessage.from_gc2_shot(shot, self._shot_number)
+        await self._send_message(message)
+
+    async def send_heartbeat(self) -> None:
+        """Send a heartbeat to GSPro.
+
+        Uses is_ready_to_report to determine LaunchMonitorIsReady value.
+        This is true only when both GC2 hardware is ready AND match is active.
+        """
+        if not self._connected or self._writer is None:
+            return
+
+        message = GSProShotMessage(
+            ShotNumber=self._shot_number,
+            ShotDataOptions=GSProShotOptions(
+                ContainsBallData=False,
+                ContainsClubData=False,
+                LaunchMonitorIsReady=self.is_ready_to_report,
+                IsHeartBeat=True,
+            ),
+        )
+        await self._send_message(message)
+
+    async def send_status(self, status: GC2BallStatus) -> None:
+        """Send ball status update to GSPro.
+
+        This sends a non-shot message to GSPro indicating:
+        - Whether the launch monitor is ready (green light)
+        - Whether a ball is detected
+        """
+        if not self._connected or self._writer is None:
+            return
+
+        message = GSProShotMessage(
+            ShotNumber=self._shot_number,
+            ShotDataOptions=GSProShotOptions(
+                ContainsBallData=False,
+                ContainsClubData=False,
+                LaunchMonitorIsReady=status.is_ready,
+                LaunchMonitorBallDetected=status.ball_detected,
+                IsHeartBeat=False,
+            ),
+        )
+        logger.debug(
+            f"Sending status: ready={status.is_ready}, ball_detected={status.ball_detected}"
+        )
+        await self._send_message(message)
+
+    async def _send_message(self, message: GSProShotMessage) -> None:
+        """Send a message with newline framing.
+
+        Appends \\n to every outbound JSON write, matching the GsProApi.cs reference.
+        """
+        if self._writer is None:
+            logger.error("Cannot send message: writer is None")
+            return
+        payload = json.dumps(message.to_dict()).encode("utf-8") + b"\n"
+        try:
+            self._writer.write(payload)
+            await self._writer.drain()
+            logger.debug(f"Sent {len(payload)} bytes: {payload[:200]!r}")
+        except (ConnectionError, OSError) as e:
+            logger.error(f"GSPro write failed: {e}")
+            self._on_connection_lost()
 
     # -------------------------------------------------------------------------
     # Reader loop for receiving unsolicited GSPro messages
     # -------------------------------------------------------------------------
+
+    async def _reader_loop(self) -> None:
+        """Background task that continuously reads from GSPro stream.
+
+        Handles unsolicited messages from GSPro such as:
+        - Code 201: Player info updates
+        - Code 202: Match started
+        - Code 203: Match ended
+        - Bare "GSPro ready" string (treated as code 202)
+        """
+        logger.debug("GSPro reader loop started")
+        buffer = b""
+        try:
+            while self._connected and self._reader is not None:
+                try:
+                    chunk = await self._reader.read(4096)
+                except (ConnectionError, OSError) as e:
+                    logger.warning(f"GSPro reader socket error: {e}")
+                    self._on_connection_lost()
+                    return
+                if not chunk:
+                    logger.warning("GSPro connection closed (EOF)")
+                    self._on_connection_lost()
+                    return
+                buffer = self._drain_buffer(buffer + chunk)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            logger.info("GSPro reader loop ended")
+
+    def _drain_buffer(self, buffer: bytes) -> bytes:
+        """Parse and dispatch complete JSON objects from the buffer.
+
+        Returns any remaining unparsed bytes.
+        """
+        text = buffer.decode("utf-8", errors="replace")
+        decoder = json.JSONDecoder()
+
+        while text:
+            stripped = text.lstrip()
+            if not stripped:
+                return b""
+            text = stripped
+
+            if text.startswith("GSPro ready"):
+                self._handle_response({"Code": 202, "Message": "GSPro ready"})
+                newline = text.find("\n")
+                if newline == -1:
+                    return b""
+                text = text[newline + 1 :]
+                continue
+
+            try:
+                obj, end = decoder.raw_decode(text)
+            except json.JSONDecodeError:
+                return text.encode("utf-8")
+
+            self._handle_response(obj)
+            text = text[end:]
+
+        return b""
+
+    def _on_connection_lost(self) -> None:
+        """Handle unexpected connection loss."""
+        if not self._connected:
+            return
+        self._connected = False
+        self._stop_heartbeat_timer()
+        self._match_started = False
+        if self._writer is not None:
+            try:
+                self._writer.close()
+            except Exception:
+                pass
+        self._notify_disconnect()
 
     def _handle_response(self, response_json: dict[str, Any]) -> None:
         """Handle a response from GSPro based on code.
@@ -245,339 +538,11 @@ class GSProClient:
                 logger.info("GSPro match ended (code 203)")
                 _notify_callbacks(self._match_ended_callbacks)
 
-    async def _reader_loop(self) -> None:
-        """Background task that continuously reads from GSPro socket.
+        response = GSProResponse.from_dict(response_json)
 
-        This loop handles unsolicited messages from GSPro such as:
-        - Code 201: Player info updates
-        - Code 202: Match started
-        - Code 203: Match ended
-        """
-        buffer = ""
-        logger.debug("GSPro reader loop started")
+        # Update player info if received
+        if response.Code == 201 and response.Player:
+            self._current_player = response.Player
+            logger.info(f"Player info: {response.Player}")
 
-        while self._reader_running and self._connected and self._socket:
-            try:
-                # Set socket to non-blocking for async reads
-                self._socket.setblocking(False)
-                try:
-                    data = self._socket.recv(4096)
-                    if not data:
-                        # Connection closed
-                        logger.warning("GSPro connection closed (empty recv)")
-                        break
-                    buffer += data.decode("utf-8")
-
-                    # Try to parse complete JSON objects
-                    while buffer:
-                        try:
-                            decoder = json.JSONDecoder()
-                            response_json, idx = decoder.raw_decode(buffer)
-                            buffer = buffer[idx:].lstrip()
-                            self._handle_response(response_json)
-                        except json.JSONDecodeError:
-                            # Incomplete JSON, wait for more data
-                            break
-
-                except BlockingIOError:
-                    # No data available, wait a bit
-                    await asyncio.sleep(0.1)
-                finally:
-                    if self._socket:
-                        self._socket.setblocking(True)
-
-            except OSError as e:
-                logger.error(f"Reader loop socket error: {e}")
-                break
-            except Exception as e:
-                logger.error(f"Reader loop error: {e}")
-                break
-
-        logger.info("GSPro reader loop ended")
-
-    def _start_reader_loop(self) -> None:
-        """Start the background reader loop.
-
-        This attempts to create an async task for the reader loop. If no event
-        loop is running (e.g., in synchronous-only contexts or tests), it will
-        log a debug message and skip starting the reader.
-        """
-        if self._reader_task is not None and not self._reader_task.done():
-            return  # Already running
-
-        try:
-            self._reader_running = True
-            self._reader_task = asyncio.create_task(self._reader_loop())
-            logger.debug("Started GSPro reader loop task")
-        except RuntimeError as e:
-            # No running event loop - this happens in sync-only contexts
-            logger.debug(f"Could not start reader loop (no event loop): {e}")
-            self._reader_running = False
-
-    def _stop_reader_loop(self) -> None:
-        """Stop the background reader loop."""
-        self._reader_running = False
-        if self._reader_task:
-            self._reader_task.cancel()
-            self._reader_task = None
-            logger.debug("Stopped GSPro reader loop task")
-
-    # -------------------------------------------------------------------------
-    # Connection management
-    # -------------------------------------------------------------------------
-
-    def connect(self) -> bool:
-        """Connect to GSPro."""
-        try:
-            # Use create_connection for cleaner connection handling
-            self._socket = socket.create_connection((self.host, self.port), timeout=5.0)
-            # Set TCP_NODELAY to disable Nagle's algorithm for immediate sends
-            self._socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            self._socket.settimeout(5.0)
-            self._connected = True
-            logger.info(f"Connected to GSPro at {self.host}:{self.port}")
-
-            # Send initial heartbeat to register with GSPro
-            # Note: GSPro doesn't respond to heartbeats, so we just send it
-            logger.info("Sending initial heartbeat to GSPro...")
-            self.send_heartbeat()
-            logger.info("Initial heartbeat sent")
-
-            # Start background reader loop for unsolicited GSPro messages
-            self._start_reader_loop()
-
-            return True
-        except OSError as e:
-            logger.error(f"Failed to connect to GSPro: {e}")
-            self._socket = None
-            self._connected = False
-            return False
-
-    def disconnect(self) -> None:
-        """Cleanly disconnect from GSPro.
-
-        Following OpenSkyPlus2 reference implementation:
-        1. Stop heartbeat timer (stop sending heartbeats)
-        2. Stop reader loop (prevent any more reads)
-        3. Send heartbeat with LaunchMonitorIsReady=false
-        4. Wait 250ms for GSPro to process
-        5. Close socket
-
-        This tells GSPro the launch monitor is going offline gracefully
-        instead of just disappearing. TCP_NODELAY ensures the heartbeat
-        is sent immediately without buffering.
-        """
-        if not self._socket:
-            self._connected = False
-            return
-
-        # Step 1: Stop the heartbeat timer
-        self._stop_heartbeat_timer()
-        self._match_started = False
-
-        # Step 2: Stop the reader loop
-        self._stop_reader_loop()
-
-        # Step 3: Tell GSPro we're going offline
-        try:
-            self._send_shutdown_heartbeat()
-        except Exception as e:
-            logger.debug(f"Error sending shutdown heartbeat: {e}")
-
-        # Step 4: Wait for GSPro to process the heartbeat
-        time.sleep(0.250)
-
-        # Step 5: Close socket
-        try:
-            self._socket.close()
-        except Exception:
-            pass
-
-        # Step 6: Clear internal state
-        self._socket = None
-        self._connected = False
-        self._shot_number = 0
-        self._current_player = None
-        logger.info("Disconnected from GSPro (clean shutdown)")
-
-    def _send_shutdown_heartbeat(self) -> None:
-        """Send final heartbeat indicating launch monitor is going offline.
-
-        This is sent without waiting for a response since GSPro doesn't
-        respond to heartbeats anyway.
-        """
-        if not self._socket:
-            return
-
-        message = GSProShotMessage(
-            ShotNumber=self._shot_number,
-            ShotDataOptions=GSProShotOptions(
-                ContainsBallData=False,
-                ContainsClubData=False,
-                LaunchMonitorIsReady=False,  # Key: telling GSPro we're going offline
-                IsHeartBeat=True,
-            ),
-        )
-        json_data = json.dumps(message.to_dict())
-        self._socket.sendall(json_data.encode("utf-8"))
-        logger.debug("Sent shutdown heartbeat (LaunchMonitorIsReady=false)")
-
-    async def disconnect_async(self) -> None:
-        """Async version of disconnect for use in async contexts."""
-        await asyncio.get_event_loop().run_in_executor(None, self.disconnect)
-
-    async def connect_async(self) -> bool:
-        """Async version of connect."""
-        return await asyncio.get_event_loop().run_in_executor(None, self.connect)
-
-    def send_shot(self, shot: GC2ShotData) -> GSProResponse | None:
-        """Send a shot to GSPro."""
-        if not self._connected or not self._socket:
-            logger.error("Not connected to GSPro")
-            return None
-
-        self._shot_number += 1
-        message = GSProShotMessage.from_gc2_shot(shot, self._shot_number)
-
-        return self._send_message(message)
-
-    def send_heartbeat(self) -> GSProResponse | None:
-        """Send a heartbeat to GSPro.
-
-        Uses is_ready_to_report to determine LaunchMonitorIsReady value.
-        This is true only when both GC2 hardware is ready AND match is active.
-
-        Note: GSPro doesn't respond to heartbeat messages, so we don't wait for a response.
-        """
-        if not self._connected or not self._socket:
-            return None
-
-        message = GSProShotMessage(
-            ShotNumber=self._shot_number,
-            ShotDataOptions=GSProShotOptions(
-                ContainsBallData=False,
-                ContainsClubData=False,
-                LaunchMonitorIsReady=self.is_ready_to_report,
-                IsHeartBeat=True,
-            ),
-        )
-
-        return self._send_message(message, expect_response=False)
-
-    def send_status(self, status: GC2BallStatus) -> GSProResponse | None:
-        """Send ball status update to GSPro.
-
-        This sends a non-shot message to GSPro indicating:
-        - Whether the launch monitor is ready (green light)
-        - Whether a ball is detected
-
-        This helps GSPro know when to expect shot data.
-
-        Note: GSPro doesn't respond to status messages, so we don't wait for a response.
-        """
-        if not self._connected or not self._socket:
-            return None
-
-        message = GSProShotMessage(
-            ShotNumber=self._shot_number,
-            ShotDataOptions=GSProShotOptions(
-                ContainsBallData=False,
-                ContainsClubData=False,
-                LaunchMonitorIsReady=status.is_ready,
-                LaunchMonitorBallDetected=status.ball_detected,
-                IsHeartBeat=False,
-            ),
-        )
-
-        logger.debug(
-            f"Sending status: ready={status.is_ready}, ball_detected={status.ball_detected}"
-        )
-        return self._send_message(message, expect_response=False)
-
-    async def send_status_async(self, status: GC2BallStatus) -> GSProResponse | None:
-        """Async version of send_status."""
-        return await asyncio.get_event_loop().run_in_executor(None, self.send_status, status)
-
-    def _send_message(
-        self, message: GSProShotMessage, expect_response: bool = True
-    ) -> GSProResponse | None:
-        """Send a message and optionally receive response.
-
-        Args:
-            message: The message to send
-            expect_response: If True, wait for and parse response. If False, just send.
-        """
-        if self._socket is None:
-            logger.error("Cannot send message: socket is None")
-            return None
-
-        sock = self._socket  # Local reference for type narrowing
-
-        try:
-            # Clear any buffered data before sending (stale responses)
-            sock.setblocking(False)
-            try:
-                while True:
-                    stale = sock.recv(4096)
-                    if stale:
-                        logger.debug(f"Cleared {len(stale)} bytes of stale buffer data")
-                    else:
-                        break
-            except BlockingIOError:
-                pass  # No data to clear, good
-            finally:
-                sock.setblocking(True)
-
-            # Send JSON message
-            json_data = json.dumps(message.to_dict())
-            encoded = json_data.encode("utf-8")
-            sock.sendall(encoded)
-            logger.debug(f"Sent {len(encoded)} bytes: {json_data}")
-
-            if not expect_response:
-                return None
-
-            # Receive response
-            sock.settimeout(5.0)
-            logger.debug("Waiting for response...")
-            response_data = sock.recv(4096)
-
-            if not response_data:
-                logger.warning("Empty response from GSPro")
-                return None
-
-            response_str = response_data.decode("utf-8")
-
-            # Parse only the first JSON object (handle concatenated responses)
-            decoder = json.JSONDecoder()
-            response_json, _ = decoder.raw_decode(response_str)
-            response = GSProResponse.from_dict(response_json)
-
-            logger.debug(f"Received: {response_json}")
-
-            # Update player info if received
-            if response.Code == 201 and response.Player:
-                self._current_player = response.Player
-                logger.info(f"Player info: {response.Player}")
-
-            self._notify_response(response)
-            return response
-
-        except TimeoutError:
-            logger.warning("Timeout waiting for GSPro response")
-            return None
-        except OSError as e:
-            logger.error(f"Socket error: {e}")
-            was_connected = self._connected
-            self._connected = False
-            if was_connected:
-                logger.error("GSPro connection lost!")
-                self._notify_disconnect()
-            return None
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON response: {e}")
-            return None
-
-    async def send_shot_async(self, shot: GC2ShotData) -> GSProResponse | None:
-        """Async version of send_shot."""
-        return await asyncio.get_event_loop().run_in_executor(None, self.send_shot, shot)
+        self._notify_response(response)
