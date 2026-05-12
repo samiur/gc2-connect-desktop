@@ -140,7 +140,10 @@ class GC2ConnectApp:
 
         # Reconnection managers
         self._gc2_reconnect_mgr = ReconnectionManager(max_retries=5, base_delay=1.0)
-        self._gspro_reconnect_mgr = ReconnectionManager(max_retries=5, base_delay=1.0)
+        # GSPro retries forever (user cancels via Disconnect); 5s → 60s capped backoff.
+        self._gspro_reconnect_mgr = ReconnectionManager(
+            max_retries=None, base_delay=5.0, max_delay=60.0
+        )
         self._setup_reconnection_callbacks()
 
         # Tasks for reconnection

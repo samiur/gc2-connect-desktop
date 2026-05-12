@@ -58,3 +58,12 @@ class TestInfiniteRetries:
         assert result is False
         assert mgr.state == ReconnectionState.FAILED
         assert mgr.retry_count == 3
+
+
+class TestCappedBackoff:
+    """Test the 5s -> 60s capped exponential backoff used for GSPro."""
+
+    def test_gspro_backoff_sequence(self) -> None:
+        mgr = ReconnectionManager(max_retries=None, base_delay=5.0, max_delay=60.0)
+        delays = [mgr.get_delay_for_attempt(i) for i in range(7)]
+        assert delays == [5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0]
