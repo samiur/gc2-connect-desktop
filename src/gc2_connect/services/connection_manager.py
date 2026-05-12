@@ -63,7 +63,7 @@ def _prevent_app_nap(reason: str = "Processing GC2 shot data") -> None:
         return
 
     try:
-        from Foundation import NSProcessInfo  # type: ignore[import-untyped]
+        from Foundation import NSProcessInfo  # type: ignore
 
         # NSActivityUserInitiatedAllowingIdleSystemSleep = 0x00FFFFFF
         # This prevents App Nap but allows system sleep

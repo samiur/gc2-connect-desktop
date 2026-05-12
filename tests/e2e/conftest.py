@@ -83,6 +83,8 @@ def _run_e2e_server(server: E2EMockGSProServer) -> None:
     server._server.bind((server.host, server.port))
     server._server.listen(1)
 
+    decoder = json.JSONDecoder()
+
     while server._running:
         try:
             conn, _addr = server._server.accept()
@@ -90,17 +92,33 @@ def _run_e2e_server(server: E2EMockGSProServer) -> None:
             conn.settimeout(0.5)
 
             shot_count = 0
-            while server._running:
+            text_buffer = ""
+            disconnected = False
+            while server._running and not disconnected:
                 try:
                     data = conn.recv(4096)
                     if not data:
                         break
 
-                    try:
-                        message = json.loads(data.decode("utf-8"))
+                    text_buffer += data.decode("utf-8", errors="replace")
+
+                    # Drain every complete JSON object from the buffer. The
+                    # client may send multiple newline-terminated objects in
+                    # one TCP packet, so a single json.loads is insufficient.
+                    while text_buffer:
+                        stripped = text_buffer.lstrip()
+                        if not stripped:
+                            text_buffer = ""
+                            break
+                        text_buffer = stripped
+                        try:
+                            message, end = decoder.raw_decode(text_buffer)
+                        except json.JSONDecodeError:
+                            break  # incomplete; wait for more bytes
+                        text_buffer = text_buffer[end:]
+
                         server.received_shots.append(message)
 
-                        # Check for disconnect trigger
                         if not message.get("ShotDataOptions", {}).get("IsHeartBeat", False):
                             shot_count += 1
                             if (
@@ -108,9 +126,9 @@ def _run_e2e_server(server: E2EMockGSProServer) -> None:
                                 and shot_count >= server.disconnect_after
                             ):
                                 conn.close()
+                                disconnected = True
                                 break
 
-                        # Send response
                         if server.error_mode:
                             response = {"Code": 500, "Message": "Internal error"}
                         else:
@@ -119,17 +137,17 @@ def _run_e2e_server(server: E2EMockGSProServer) -> None:
                                 "Message": "Shot received",
                                 "Player": {"Handed": "RH", "Club": "DR"},
                             }
-                        conn.sendall(json.dumps(response).encode("utf-8"))
-
-                    except json.JSONDecodeError:
-                        pass
+                        conn.sendall(json.dumps(response).encode("utf-8") + b"\n")
 
                 except TimeoutError:
                     continue
                 except OSError:
                     break
 
-            conn.close()
+            try:
+                conn.close()
+            except OSError:
+                pass
             server._conn = None
 
         except TimeoutError:
