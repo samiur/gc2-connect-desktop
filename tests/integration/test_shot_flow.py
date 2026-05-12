@@ -4,12 +4,15 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
+import time
+from typing import TYPE_CHECKING, Any
 
 from gc2_connect.gc2.usb_reader import MockGC2Reader
 from gc2_connect.gspro.client import GSProClient
 from gc2_connect.models import GC2ShotData, GSProResponse
+
+if TYPE_CHECKING:
+    pass
 
 
 def get_shot_messages(received_shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -24,27 +27,17 @@ def get_shot_messages(received_shots: list[dict[str, Any]]) -> list[dict[str, An
 class TestSingleShotFlow:
     """Test single shot flow from GC2 to GSPro."""
 
-    async def test_valid_shot_is_sent_to_gspro(
+    def test_valid_shot_is_sent_to_gspro(
         self, mock_gspro_server, gspro_client: GSProClient, sample_gc2_shot: GC2ShotData
     ):
         """Test that a valid shot from GC2 is correctly sent to GSPro."""
-        responses: list[GSProResponse] = []
+        # Send shot through client
+        response = gspro_client.send_shot(sample_gc2_shot)
 
-        def on_response(r: GSProResponse) -> None:
-            responses.append(r)
-
-        gspro_client.add_response_callback(on_response)
-
-        # Send shot through client (fire-and-forget)
-        await gspro_client.send_shot(sample_gc2_shot)
-
-        # Wait for async response to arrive
-        deadline = asyncio.get_event_loop().time() + 2.0
-        while not responses and asyncio.get_event_loop().time() < deadline:
-            await asyncio.sleep(0.05)
-
-        assert len(responses) >= 1
-        assert responses[0].is_success
+        # Verify response
+        assert response is not None
+        assert response.is_success
+        assert response.Code == 201  # Mock server returns 201 with player info
 
         # Verify server received the shot (filter out heartbeat)
         shot_messages = get_shot_messages(mock_gspro_server.received_shots)
@@ -59,29 +52,17 @@ class TestSingleShotFlow:
         assert received["BallData"]["HLA"] == sample_gc2_shot.horizontal_launch_angle
         assert received["BallData"]["TotalSpin"] == sample_gc2_shot.total_spin
 
-    async def test_shot_with_hmt_includes_club_data(
+    def test_shot_with_hmt_includes_club_data(
         self,
         mock_gspro_server,
         gspro_client: GSProClient,
         sample_gc2_shot_with_hmt: GC2ShotData,
     ):
         """Test that shots with HMT data include club data in GSPro message."""
-        responses: list[GSProResponse] = []
+        response = gspro_client.send_shot(sample_gc2_shot_with_hmt)
 
-        def on_response(r: GSProResponse) -> None:
-            responses.append(r)
-
-        gspro_client.add_response_callback(on_response)
-
-        await gspro_client.send_shot(sample_gc2_shot_with_hmt)
-
-        # Wait for async response to arrive
-        deadline = asyncio.get_event_loop().time() + 2.0
-        while not responses and asyncio.get_event_loop().time() < deadline:
-            await asyncio.sleep(0.05)
-
-        assert len(responses) >= 1
-        assert responses[0].is_success
+        assert response is not None
+        assert response.is_success
 
         # Verify club data is included (filter out heartbeat)
         shot_messages = get_shot_messages(mock_gspro_server.received_shots)
@@ -94,17 +75,15 @@ class TestSingleShotFlow:
         assert received["ClubData"]["AngleOfAttack"] == sample_gc2_shot_with_hmt.angle_of_attack
         assert received["ClubData"]["FaceToTarget"] == sample_gc2_shot_with_hmt.face_to_target
 
-    async def test_shot_number_increments(
+    def test_shot_number_increments(
         self, mock_gspro_server, gspro_client: GSProClient, sample_gc2_shot: GC2ShotData
     ):
         """Test that shot numbers increment correctly."""
         # Send multiple shots
         for expected_num in range(1, 4):
-            await gspro_client.send_shot(sample_gc2_shot)
+            response = gspro_client.send_shot(sample_gc2_shot)
+            assert response is not None
             assert gspro_client.shot_number == expected_num
-
-        # Give server time to receive all shots
-        await asyncio.sleep(0.1)
 
         # Verify shot numbers on server (filter out heartbeat)
         shot_messages = get_shot_messages(mock_gspro_server.received_shots)
@@ -112,17 +91,14 @@ class TestSingleShotFlow:
         for i, shot in enumerate(shot_messages, 1):
             assert shot["ShotNumber"] == i
 
-    async def test_spin_axis_calculated_correctly(
+    def test_spin_axis_calculated_correctly(
         self, mock_gspro_server, gspro_client: GSProClient, sample_gc2_shot: GC2ShotData
     ):
         """Test that spin axis is calculated from back/side spin."""
-        await gspro_client.send_shot(sample_gc2_shot)
+        response = gspro_client.send_shot(sample_gc2_shot)
 
-        # Wait for shot to be received
-        await asyncio.sleep(0.1)
-
+        assert response is not None
         shot_messages = get_shot_messages(mock_gspro_server.received_shots)
-        assert len(shot_messages) >= 1
         received = shot_messages[0]
 
         # Spin axis should match calculated value
@@ -133,7 +109,7 @@ class TestSingleShotFlow:
 class TestMultipleShotsFlow:
     """Test multiple shots in sequence."""
 
-    async def test_multiple_shots_sent_in_order(self, mock_gspro_server, gspro_client: GSProClient):
+    def test_multiple_shots_sent_in_order(self, mock_gspro_server, gspro_client: GSProClient):
         """Test that multiple shots are sent and received in order."""
         shots = [
             GC2ShotData(
@@ -147,23 +123,10 @@ class TestMultipleShotsFlow:
             for i in range(1, 6)
         ]
 
-        responses: list[GSProResponse] = []
-
-        def on_response(r: GSProResponse) -> None:
-            responses.append(r)
-
-        gspro_client.add_response_callback(on_response)
-
         for shot in shots:
-            await gspro_client.send_shot(shot)
-
-        # Wait for all responses to arrive
-        deadline = asyncio.get_event_loop().time() + 2.0
-        while len(responses) < 5 and asyncio.get_event_loop().time() < deadline:
-            await asyncio.sleep(0.05)
-
-        assert len(responses) == 5
-        assert all(r.is_success for r in responses)
+            response = gspro_client.send_shot(shot)
+            assert response is not None
+            assert response.is_success
 
         # Verify all shots received (filter out heartbeat)
         shot_messages = get_shot_messages(mock_gspro_server.received_shots)
@@ -174,22 +137,13 @@ class TestMultipleShotsFlow:
             expected_speed = 140 + (i + 1) * 5
             assert received["BallData"]["Speed"] == expected_speed
 
-    async def test_shot_history_with_varying_data(
-        self, mock_gspro_server, gspro_client: GSProClient
-    ):
+    def test_shot_history_with_varying_data(self, mock_gspro_server, gspro_client: GSProClient):
         """Test sending shots with varying ball speeds, spins, and angles."""
         test_data = [
             {"speed": 100, "spin": 6000, "launch": 25, "hla": 0},  # Wedge
             {"speed": 140, "spin": 4000, "launch": 15, "hla": -2},  # Mid-iron
             {"speed": 165, "spin": 2500, "launch": 12, "hla": 5},  # Driver
         ]
-
-        responses: list[GSProResponse] = []
-
-        def on_response(r: GSProResponse) -> None:
-            responses.append(r)
-
-        gspro_client.add_response_callback(on_response)
 
         for data in test_data:
             shot = GC2ShotData(
@@ -201,15 +155,9 @@ class TestMultipleShotsFlow:
                 back_spin=data["spin"] - 200,
                 side_spin=200,
             )
-            await gspro_client.send_shot(shot)
-
-        # Wait for all responses
-        deadline = asyncio.get_event_loop().time() + 2.0
-        while len(responses) < 3 and asyncio.get_event_loop().time() < deadline:
-            await asyncio.sleep(0.05)
-
-        assert len(responses) == 3
-        assert all(r.is_success for r in responses)
+            response = gspro_client.send_shot(shot)
+            assert response is not None
+            assert response.is_success
 
         # Verify all shots have correct data (filter out heartbeat)
         shot_messages = get_shot_messages(mock_gspro_server.received_shots)
@@ -224,13 +172,13 @@ class TestMultipleShotsFlow:
 class TestMockGC2ToGSProFlow:
     """Test complete flow from MockGC2 through callback to GSPro."""
 
-    async def test_mock_gc2_shot_callback_to_gspro(
+    def test_mock_gc2_shot_callback_to_gspro(
         self, mock_gspro_server, mock_gc2_reader: MockGC2Reader
     ):
         """Test that MockGC2 shots flow through callback to GSPro client."""
         # Create GSPro client
         client = GSProClient(host=mock_gspro_server.host, port=mock_gspro_server.port)
-        connected = await client.connect()
+        connected = client.connect()
         assert connected
 
         try:
@@ -238,30 +186,22 @@ class TestMockGC2ToGSProFlow:
 
             def on_shot(shot: GC2ShotData) -> None:
                 received_shots.append(shot)
-                # Schedule send_shot as an async task
-                asyncio.get_event_loop().create_task(client.send_shot(shot))
+                # Send to GSPro
+                client.send_shot(shot)
 
             # Register callback
             mock_gc2_reader.add_shot_callback(on_shot)
             mock_gc2_reader.connect()
 
-            # Give time for heartbeat response to be processed
-            await asyncio.sleep(0.1)
+            # Wait for heartbeat response to be processed
+            time.sleep(0.1)
 
             # Simulate test shots
             for _ in range(3):
                 mock_gc2_reader.send_test_shot()
 
-            # Wait for shots to be processed
-            deadline = asyncio.get_event_loop().time() + 2.0
-            while len(received_shots) < 3 and asyncio.get_event_loop().time() < deadline:
-                await asyncio.sleep(0.05)
-
             # Verify shots received by callback
             assert len(received_shots) == 3
-
-            # Give time for shots to reach GSPro server
-            await asyncio.sleep(0.1)
 
             # Verify shots sent to GSPro (filter out heartbeat)
             shot_messages = get_shot_messages(mock_gspro_server.received_shots)
@@ -273,7 +213,7 @@ class TestMockGC2ToGSProFlow:
             assert len(set(shot_numbers)) == 3  # All unique
 
         finally:
-            await client.disconnect()
+            client.disconnect()
             mock_gc2_reader.disconnect()
 
     def test_shot_validation_prevents_sending(
@@ -328,7 +268,7 @@ class TestMockGC2ToGSProFlow:
 class TestShotDataTransformation:
     """Test shot data transformation from GC2 to GSPro format."""
 
-    async def test_ball_data_mapping(self, mock_gspro_server, gspro_client: GSProClient):
+    def test_ball_data_mapping(self, mock_gspro_server, gspro_client: GSProClient):
         """Test all ball data fields are correctly mapped."""
         shot = GC2ShotData(
             shot_id=1,
@@ -340,13 +280,9 @@ class TestShotDataTransformation:
             side_spin=-400,
         )
 
-        await gspro_client.send_shot(shot)
-
-        # Wait for shot to be received
-        await asyncio.sleep(0.1)
+        gspro_client.send_shot(shot)
 
         shot_messages = get_shot_messages(mock_gspro_server.received_shots)
-        assert len(shot_messages) >= 1
         received = shot_messages[0]["BallData"]
         assert received["Speed"] == 150.5
         assert received["VLA"] == 11.2
@@ -355,7 +291,7 @@ class TestShotDataTransformation:
         assert received["BackSpin"] == 2700
         assert received["SideSpin"] == -400
 
-    async def test_club_data_mapping(self, mock_gspro_server, gspro_client: GSProClient):
+    def test_club_data_mapping(self, mock_gspro_server, gspro_client: GSProClient):
         """Test all club data fields are correctly mapped."""
         shot = GC2ShotData(
             shot_id=1,
@@ -375,13 +311,9 @@ class TestShotDataTransformation:
             closure_rate=350.0,
         )
 
-        await gspro_client.send_shot(shot)
-
-        # Wait for shot to be received
-        await asyncio.sleep(0.1)
+        gspro_client.send_shot(shot)
 
         shot_messages = get_shot_messages(mock_gspro_server.received_shots)
-        assert len(shot_messages) >= 1
         received = shot_messages[0]["ClubData"]
         assert received["Speed"] == 105.5
         assert received["Path"] == 2.1
@@ -393,17 +325,13 @@ class TestShotDataTransformation:
         assert received["VerticalFaceImpact"] == -2.0
         assert received["ClosureRate"] == 350.0
 
-    async def test_shot_options_correct(
+    def test_shot_options_correct(
         self, mock_gspro_server, gspro_client: GSProClient, sample_gc2_shot: GC2ShotData
     ):
         """Test ShotDataOptions are set correctly."""
-        await gspro_client.send_shot(sample_gc2_shot)
-
-        # Wait for shot to be received
-        await asyncio.sleep(0.1)
+        gspro_client.send_shot(sample_gc2_shot)
 
         shot_messages = get_shot_messages(mock_gspro_server.received_shots)
-        assert len(shot_messages) >= 1
         options = shot_messages[0]["ShotDataOptions"]
         assert options["ContainsBallData"] is True
         assert options["ContainsClubData"] is False  # No club data in sample shot
@@ -415,7 +343,7 @@ class TestShotDataTransformation:
 class TestResponseHandling:
     """Test handling of GSPro responses."""
 
-    async def test_response_callback_invoked(
+    def test_response_callback_invoked(
         self, mock_gspro_server, gspro_client: GSProClient, sample_gc2_shot: GC2ShotData
     ):
         """Test that response callbacks are invoked on shot response."""
@@ -426,34 +354,18 @@ class TestResponseHandling:
 
         gspro_client.add_response_callback(on_response)
 
-        await gspro_client.send_shot(sample_gc2_shot)
+        gspro_client.send_shot(sample_gc2_shot)
 
-        # Wait for callback to be invoked (async, arrives via reader loop)
-        deadline = asyncio.get_event_loop().time() + 2.0
-        while not responses and asyncio.get_event_loop().time() < deadline:
-            await asyncio.sleep(0.05)
-
+        # Give callback time to be invoked (synchronous call)
         assert len(responses) == 1
         assert responses[0].Code == 201  # Mock server returns 201 with player info
         assert responses[0].is_success
 
-    async def test_player_info_extracted(
+    def test_player_info_extracted(
         self, mock_gspro_server, gspro_client: GSProClient, sample_gc2_shot: GC2ShotData
     ):
         """Test that player info is extracted from response."""
-        responses: list[GSProResponse] = []
-
-        def on_response(response: GSProResponse) -> None:
-            responses.append(response)
-
-        gspro_client.add_response_callback(on_response)
-
-        await gspro_client.send_shot(sample_gc2_shot)
-
-        # Wait for response to arrive
-        deadline = asyncio.get_event_loop().time() + 2.0
-        while not responses and asyncio.get_event_loop().time() < deadline:
-            await asyncio.sleep(0.05)
+        gspro_client.send_shot(sample_gc2_shot)
 
         # Mock server sends player info
         player = gspro_client.current_player

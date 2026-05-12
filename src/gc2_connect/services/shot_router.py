@@ -161,7 +161,7 @@ class ShotRouter:
             raise RuntimeError("GSPro client not configured")
 
         logger.debug(f"Routing shot {shot.shot_id} to GSPro")
-        await self._gspro_client.send_shot(shot)
+        await self._gspro_client.send_shot_async(shot)
 
     async def _route_to_open_range(self, shot: GC2ShotData) -> None:
         """Process shot in Open Range.

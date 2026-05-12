@@ -77,7 +77,6 @@ class MockGSProServer:
         self._connections: list[asyncio.StreamWriter] = []
         self._running = False
         self._actual_port: int = 0
-        self.received_raw_bytes: list[bytes] = []
 
     @property
     def config(self) -> MockGSProServerConfig:
@@ -131,29 +130,6 @@ class MockGSProServer:
     def clear_shots(self) -> None:
         """Clear recorded shots."""
         self._shots.clear()
-
-    async def close_all_connections(self) -> None:
-        """Close all active client connections, simulating a server-side disconnect."""
-        for writer in list(self._connections):
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception:
-                pass
-        self._connections.clear()
-
-    async def send_raw_to_clients(self, data: bytes) -> None:
-        """Send raw bytes to all connected clients.
-
-        Args:
-            data: Raw bytes to send to each client.
-        """
-        for writer in list(self._connections):
-            try:
-                writer.write(data)
-                await writer.drain()
-            except Exception:
-                pass
 
     async def wait_for_shots(
         self,
@@ -238,14 +214,8 @@ class MockGSProServer:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Handle a client connection.
-
-        Uses a streaming buffer to correctly parse multiple newline-terminated
-        JSON objects that may arrive in a single read() call.
-        """
+        """Handle a client connection."""
         self._connections.append(writer)
-        buffer = b""
-        decoder = json.JSONDecoder()
 
         try:
             while self._running:
@@ -257,46 +227,30 @@ class MockGSProServer:
                 if not data:
                     break
 
-                # Record raw bytes received
-                self.received_raw_bytes.append(data)
-                buffer += data
+                # Parse the message
+                try:
+                    message = json.loads(data.decode("utf-8"))
+                except json.JSONDecodeError:
+                    continue
 
-                # Parse all complete JSON objects from buffer
-                text = buffer.decode("utf-8", errors="replace")
-                while text.strip():
-                    text = text.lstrip()
-                    if not text:
-                        break
-                    try:
-                        message, end = decoder.raw_decode(text)
-                    except json.JSONDecodeError:
-                        # Incomplete JSON - wait for more data
-                        break
+                # Record the shot
+                shot = ReceivedShot(
+                    shot_number=message.get("ShotNumber", 0),
+                    ball_data=message.get("BallData", {}),
+                    club_data=message.get("ClubData", {}),
+                    raw_message=message,
+                )
+                self._shots.append(shot)
 
-                    text = text[end:]
+                # Check disconnect after shots
+                if (
+                    self._config.disconnect_after_shots > 0
+                    and len(self._shots) >= self._config.disconnect_after_shots
+                ):
+                    break
 
-                    # Record the shot
-                    shot = ReceivedShot(
-                        shot_number=message.get("ShotNumber", 0),
-                        ball_data=message.get("BallData", {}),
-                        club_data=message.get("ClubData", {}),
-                        raw_message=message,
-                    )
-                    self._shots.append(shot)
-
-                    # Check disconnect after shots
-                    if (
-                        self._config.disconnect_after_shots > 0
-                        and len(self._shots) >= self._config.disconnect_after_shots
-                    ):
-                        writer.close()
-                        await writer.wait_closed()
-                        return
-
-                    # Handle based on response type
-                    await self._send_response(writer, shot)
-
-                buffer = text.encode("utf-8") if text else b""
+                # Handle based on response type
+                await self._send_response(writer, shot)
 
         except Exception:
             pass

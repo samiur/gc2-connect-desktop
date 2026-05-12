@@ -123,7 +123,7 @@ class TestGSProConnectionErrors:
 
         # This will timeout trying to connect
         # Set a short timeout to speed up test
-        with patch.object(GSProClient, "connect") as mock_connect:
+        with patch.object(GSProClient, "connect_async") as mock_connect:
             mock_connect.return_value = False
             await app._connect_gspro()
 
@@ -173,11 +173,8 @@ class TestGSProConnectionErrors:
         await app._connect_gspro()
         assert app.gspro_client is not None
 
-        # Disconnect (schedules async task via create_task)
+        # Disconnect
         app._disconnect_gspro()
-
-        # Allow the scheduled disconnect task to complete (includes 0.25s grace period)
-        await asyncio.sleep(0.5)
 
         # Should be cleaned up
         assert app.gspro_client is None
@@ -351,11 +348,8 @@ class TestRecoveryScenarios:
         await app._connect_gspro()
         assert app.gspro_client is not None
 
-        # Disconnect (schedules async task via create_task)
+        # Disconnect
         app._disconnect_gspro()
-
-        # Allow the scheduled disconnect task to complete (includes 0.25s grace period)
-        await asyncio.sleep(0.5)
         assert app.gspro_client is None
 
         # Reconnect
@@ -452,11 +446,8 @@ class TestShutdown:
         assert app.gc2_reader is not None
         assert app.gspro_client is not None
 
-        # Shutdown (gspro disconnect is scheduled as async task)
+        # Shutdown
         app.shutdown()
-
-        # Allow the scheduled GSPro disconnect task to complete (includes 0.25s grace period)
-        await asyncio.sleep(0.5)
 
         # Both should be disconnected
         assert app.gc2_reader is None

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -20,13 +20,10 @@ def client() -> GSProClient:
 
 @pytest.fixture
 def connected_client() -> Generator[GSProClient, None, None]:
-    """Create a GSProClient that appears connected, with a mocked writer."""
+    """Create a GSProClient that appears connected."""
     client = GSProClient()
     client._connected = True
-    writer = MagicMock()
-    writer.write = MagicMock()
-    writer.drain = AsyncMock()
-    client._writer = writer
+    client._socket = MagicMock()
     yield client
 
 
@@ -77,36 +74,36 @@ class TestSetHardwareReady:
     def test_set_hardware_ready_sends_status_during_match(
         self, connected_client: GSProClient
     ) -> None:
-        """Test set_hardware_ready schedules a heartbeat when match is active."""
+        """Test set_hardware_ready sends status update when match is active."""
         connected_client._match_started = True
 
-        with patch.object(connected_client, "_schedule_heartbeat") as mock_schedule:
+        with patch.object(connected_client, "send_heartbeat") as mock_heartbeat:
             connected_client.set_hardware_ready(True)
 
-            mock_schedule.assert_called_once()
+            mock_heartbeat.assert_called_once()
 
     def test_set_hardware_ready_no_status_when_no_match(
         self, connected_client: GSProClient
     ) -> None:
-        """Test set_hardware_ready doesn't schedule heartbeat when no match is active."""
+        """Test set_hardware_ready doesn't send status when no match is active."""
         connected_client._match_started = False
 
-        with patch.object(connected_client, "_schedule_heartbeat") as mock_schedule:
+        with patch.object(connected_client, "send_heartbeat") as mock_heartbeat:
             connected_client.set_hardware_ready(True)
 
-            mock_schedule.assert_not_called()
+            mock_heartbeat.assert_not_called()
 
     def test_set_hardware_ready_no_status_when_value_unchanged(
         self, connected_client: GSProClient
     ) -> None:
-        """Test set_hardware_ready doesn't schedule heartbeat when value doesn't change."""
+        """Test set_hardware_ready doesn't send status when value doesn't change."""
         connected_client._match_started = True
         connected_client._hardware_ready = True
 
-        with patch.object(connected_client, "_schedule_heartbeat") as mock_schedule:
+        with patch.object(connected_client, "send_heartbeat") as mock_heartbeat:
             connected_client.set_hardware_ready(True)  # Same value
 
-            mock_schedule.assert_not_called()
+            mock_heartbeat.assert_not_called()
 
 
 class TestOnMatchStarted:
@@ -118,7 +115,7 @@ class TestOnMatchStarted:
 
         with (
             patch.object(connected_client, "_start_heartbeat_timer"),
-            patch.object(connected_client, "_schedule_heartbeat"),
+            patch.object(connected_client, "send_heartbeat"),
         ):
             connected_client._on_match_started()
 
@@ -128,21 +125,21 @@ class TestOnMatchStarted:
         """Test _on_match_started starts the heartbeat timer."""
         with (
             patch.object(connected_client, "_start_heartbeat_timer") as mock_start_timer,
-            patch.object(connected_client, "_schedule_heartbeat"),
+            patch.object(connected_client, "send_heartbeat"),
         ):
             connected_client._on_match_started()
 
             mock_start_timer.assert_called_once()
 
     def test_on_match_started_sends_status(self, connected_client: GSProClient) -> None:
-        """Test _on_match_started schedules a heartbeat."""
+        """Test _on_match_started sends current status."""
         with (
             patch.object(connected_client, "_start_heartbeat_timer"),
-            patch.object(connected_client, "_schedule_heartbeat") as mock_schedule,
+            patch.object(connected_client, "send_heartbeat") as mock_heartbeat,
         ):
             connected_client._on_match_started()
 
-            mock_schedule.assert_called_once()
+            mock_heartbeat.assert_called_once()
 
     def test_on_match_started_idempotent(self, connected_client: GSProClient) -> None:
         """Test _on_match_started is idempotent (no double-start)."""
@@ -150,12 +147,12 @@ class TestOnMatchStarted:
 
         with (
             patch.object(connected_client, "_start_heartbeat_timer") as mock_start_timer,
-            patch.object(connected_client, "_schedule_heartbeat") as mock_schedule,
+            patch.object(connected_client, "send_heartbeat") as mock_heartbeat,
         ):
             connected_client._on_match_started()
 
             mock_start_timer.assert_not_called()
-            mock_schedule.assert_not_called()
+            mock_heartbeat.assert_not_called()
 
 
 class TestOnMatchEnded:
@@ -243,7 +240,7 @@ class TestHeartbeatLoop:
         connected_client._match_started = True
         heartbeat_count = 0
 
-        async def mock_send_heartbeat() -> None:
+        def mock_send_heartbeat() -> None:
             nonlocal heartbeat_count
             heartbeat_count += 1
             # Stop after 2 heartbeats
@@ -251,10 +248,8 @@ class TestHeartbeatLoop:
                 connected_client._match_started = False
 
         with (
-            patch.object(
-                connected_client, "send_heartbeat", new=AsyncMock(side_effect=mock_send_heartbeat)
-            ),
-            patch("asyncio.sleep", new=AsyncMock(return_value=None)) as mock_sleep,
+            patch.object(connected_client, "send_heartbeat", side_effect=mock_send_heartbeat),
+            patch("asyncio.sleep", return_value=None) as mock_sleep,
         ):
             await connected_client._heartbeat_loop()
 
@@ -276,7 +271,7 @@ class TestHeartbeatLoop:
                 connected_client._connected = False
 
         with (
-            patch.object(connected_client, "send_heartbeat", new=AsyncMock()),
+            patch.object(connected_client, "send_heartbeat"),
             patch("asyncio.sleep", side_effect=mock_sleep),
         ):
             await connected_client._heartbeat_loop()
@@ -297,7 +292,7 @@ class TestHeartbeatLoop:
                 connected_client._match_started = False
 
         with (
-            patch.object(connected_client, "send_heartbeat", new=AsyncMock()),
+            patch.object(connected_client, "send_heartbeat"),
             patch("asyncio.sleep", side_effect=mock_sleep),
         ):
             await connected_client._heartbeat_loop()
@@ -309,67 +304,67 @@ class TestHeartbeatLoop:
 class TestSendHeartbeatWithReadyState:
     """Test that send_heartbeat uses is_ready_to_report."""
 
-    @pytest.mark.asyncio
-    async def test_send_heartbeat_uses_is_ready_to_report_true(
+    def test_send_heartbeat_uses_is_ready_to_report_true(
         self, connected_client: GSProClient
     ) -> None:
         """Test send_heartbeat sends LaunchMonitorIsReady=true when is_ready_to_report is true."""
         connected_client._hardware_ready = True
         connected_client._match_started = True
 
-        mock_writer = connected_client._writer
-        assert mock_writer is not None
+        mock_socket = connected_client._socket
+        assert mock_socket is not None
 
-        await connected_client.send_heartbeat()
+        # Set up socket to allow non-blocking check
+        mock_socket.recv.side_effect = BlockingIOError()
+
+        connected_client.send_heartbeat()
 
         # Check the sent data
-        mock_writer.write.assert_called_once()
-        sent_data = mock_writer.write.call_args[0][0].decode("utf-8")
+        mock_socket.sendall.assert_called_once()
+        sent_data = mock_socket.sendall.call_args[0][0].decode("utf-8")
         assert '"LaunchMonitorIsReady": true' in sent_data
-        assert sent_data.endswith("\n")
 
-    @pytest.mark.asyncio
-    async def test_send_heartbeat_uses_is_ready_to_report_false(
+    def test_send_heartbeat_uses_is_ready_to_report_false(
         self, connected_client: GSProClient
     ) -> None:
         """Test send_heartbeat sends LaunchMonitorIsReady=false when is_ready_to_report is false."""
         connected_client._hardware_ready = True
         connected_client._match_started = False  # Match not started
 
-        mock_writer = connected_client._writer
-        assert mock_writer is not None
+        mock_socket = connected_client._socket
+        assert mock_socket is not None
 
-        await connected_client.send_heartbeat()
+        # Set up socket to allow non-blocking check
+        mock_socket.recv.side_effect = BlockingIOError()
+
+        connected_client.send_heartbeat()
 
         # Check the sent data
-        mock_writer.write.assert_called_once()
-        sent_data = mock_writer.write.call_args[0][0].decode("utf-8")
+        mock_socket.sendall.assert_called_once()
+        sent_data = mock_socket.sendall.call_args[0][0].decode("utf-8")
         assert '"LaunchMonitorIsReady": false' in sent_data
-        assert sent_data.endswith("\n")
 
 
 class TestDisconnectStopsHeartbeat:
     """Test that disconnect stops the heartbeat timer."""
 
-    @pytest.mark.asyncio
-    async def test_disconnect_stops_heartbeat_timer(self, connected_client: GSProClient) -> None:
+    def test_disconnect_stops_heartbeat_timer(self, connected_client: GSProClient) -> None:
         """Test disconnect stops the heartbeat timer."""
         mock_task = MagicMock()
         connected_client._heartbeat_task = mock_task
 
-        with patch.object(connected_client, "_send_shutdown_heartbeat", new=AsyncMock()):
-            await connected_client.disconnect()
+        with patch.object(connected_client, "_send_shutdown_heartbeat"):
+            connected_client.disconnect()
 
         mock_task.cancel.assert_called_once()
         assert connected_client._heartbeat_task is None
 
-    @pytest.mark.asyncio
-    async def test_disconnect_clears_match_state(self, connected_client: GSProClient) -> None:
+    def test_disconnect_clears_match_state(self, connected_client: GSProClient) -> None:
         """Test disconnect clears match state."""
         connected_client._match_started = True
 
-        with patch.object(connected_client, "_send_shutdown_heartbeat", new=AsyncMock()):
-            await connected_client.disconnect()
+        with patch.object(connected_client, "_send_shutdown_heartbeat"):
+            connected_client.disconnect()
 
         assert connected_client._match_started is False
 
