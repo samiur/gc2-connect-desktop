@@ -105,9 +105,18 @@ Target Release: v1.1.0 (with Open Range)
 
 ---
 
-## Phase 5d: Minigames Framework (PLANNED)
+## Phase 5d: Minigames Framework (IN PROGRESS)
 
-- [ ] **Prompt 27**: Minigames Base Architecture
+- [x] **Prompt 27**: Minigames Base Architecture
+  - [x] Create GameType enum (PUTTING_GREEN, TARGET_RANGE, GOLF_DARTS)
+  - [x] Create GameState enum (SETUP, PLAYING, PAUSED, FINISHED)
+  - [x] Create GameConfig, GameScore, GameResult models
+  - [x] Create BaseMinigame abstract base class
+  - [x] Create GameManager for game lifecycle management
+  - [x] Add MINIGAME mode to AppMode enum
+  - [x] Update ShotRouter to route shots to minigames
+  - [x] Write tests in tests/unit/test_minigames/
+
 - [ ] **Prompt 28**: Putting Green Minigame
 - [ ] **Prompt 29**: Target Range Minigame
 - [ ] **Prompt 30**: Golf Darts Minigame
